@@ -16,41 +16,64 @@
   }
 
   .container {
-    max-width: 820px; margin: 0 auto;
-    padding: 24px 20px max(24px, env(safe-area-inset-bottom, 24px));
-    padding-top: max(24px, env(safe-area-inset-top, 24px));
+    max-width: 960px; margin: 0 auto;
+    padding: 16px 20px max(16px, env(safe-area-inset-bottom, 16px));
+    padding-top: max(16px, env(safe-area-inset-top, 16px));
   }
 
-  /* Header */
-  .header { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
-  .header-text { flex: 1; }
-  .header h1 { font-size: 26px; font-weight: 700; letter-spacing: -0.5px; color: rgba(0,0,0,0.85); }
-  .header .sub { font-size: 13px; color: rgba(0,0,0,0.35); margin-top: 2px; }
-
-  /* Stats row */
-  .stats { display: flex; gap: 10px; margin-bottom: 16px; }
-  .stat {
-    flex: 1; padding: 14px 16px;
-    background: rgba(255,255,255,0.7);
-    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-    border: 1px solid rgba(255,255,255,0.8);
-    border-radius: 16px;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.03);
+  /* Compact Header */
+  .header {
+    display: flex; align-items: center; gap: 12px; margin-bottom: 12px;
   }
-  .stat .label { font-size: 11px; color: rgba(0,0,0,0.3); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
-  .stat .val { font-size: 20px; font-weight: 700; color: rgba(0,0,0,0.7); margin-top: 3px; }
-  .stat .val.green { color: #34c759; }
-
-  /* Chat entry */
-  .chat-entry {
-    display: flex; align-items: center; justify-content: center; gap: 8px;
-    padding: 16px; margin-bottom: 16px;
-    background: rgba(0,122,255,0.08); border-radius: 16px;
-    border: 1.5px solid rgba(0,122,255,0.15);
-    color: #007aff; font-size: 16px; font-weight: 600;
-    text-decoration: none; transition: all 0.15s;
+  .header h1 {
+    font-size: 22px; font-weight: 700; letter-spacing: -0.5px; color: rgba(0,0,0,0.85);
   }
-  .chat-entry:hover { background: rgba(0,122,255,0.14); }
+  .header-badge {
+    padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600;
+  }
+  .header-badge.on { background: rgba(52,199,89,0.12); color: #1a7f37; }
+  .header-badge.off { background: rgba(255,59,48,0.12); color: #991b1b; }
+  .header-uptime {
+    font-size: 12px; color: rgba(0,0,0,0.3); margin-left: 2px;
+  }
+  .header-spacer { flex: 1; }
+  .header-chat {
+    padding: 7px 16px; border-radius: 10px; border: none;
+    background: rgba(0,122,255,0.08); color: #007aff;
+    font-size: 13px; font-weight: 600; font-family: inherit;
+    cursor: pointer; text-decoration: none; transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .header-chat:hover { background: rgba(0,122,255,0.15); }
+
+  /* Main Tabs */
+  .main-tabs {
+    display: flex; gap: 0; margin-bottom: 14px;
+    background: rgba(255,255,255,0.55);
+    backdrop-filter: blur(40px) saturate(180%);
+    -webkit-backdrop-filter: blur(40px) saturate(180%);
+    border: 1px solid rgba(255,255,255,0.7);
+    border-radius: 14px; overflow: hidden;
+    box-shadow: 0 1px 8px rgba(0,0,0,0.03);
+  }
+  .main-tab {
+    flex: 1; padding: 11px 8px; text-align: center; cursor: pointer;
+    border: none; background: none; font-family: inherit;
+    font-size: 13px; font-weight: 500; color: rgba(0,0,0,0.4);
+    transition: all 0.2s; position: relative;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    min-height: 44px;
+  }
+  .main-tab:hover { background: rgba(0,0,0,0.02); }
+  .main-tab.active {
+    color: #007aff; font-weight: 600;
+    background: rgba(0,122,255,0.08);
+  }
+  .main-tab .tab-icon { font-size: 15px; }
+
+  /* Tab content */
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
 
   /* Glass card */
   .glass {
@@ -62,8 +85,62 @@
     box-shadow: 0 1px 12px rgba(0,0,0,0.04);
     overflow: hidden;
   }
+  .glass + .glass { margin-top: 14px; }
 
-  /* Provider tabs */
+  /* Stats row */
+  .stats { display: flex; gap: 10px; margin-bottom: 14px; }
+  .stat {
+    flex: 1; padding: 14px 16px;
+    background: rgba(255,255,255,0.7);
+    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255,255,255,0.8);
+    border-radius: 16px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.03);
+  }
+  .stat .label { font-size: 11px; color: rgba(0,0,0,0.3); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+  .stat .val { font-size: 20px; font-weight: 700; color: rgba(0,0,0,0.7); margin-top: 3px; }
+  .stat .val.green { color: #34c759; }
+  .stat .val.red { color: #ff3b30; }
+
+  /* Quick provider grid */
+  .prov-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+    margin-bottom: 14px;
+  }
+  .prov-chip {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 12px; border-radius: 12px;
+    background: rgba(255,255,255,0.7);
+    border: 1px solid rgba(255,255,255,0.8);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.03);
+    cursor: pointer; transition: all 0.15s;
+  }
+  .prov-chip:hover { background: rgba(255,255,255,0.9); }
+  .prov-chip img { width: 22px; height: 22px; border-radius: 0; object-fit: contain; flex-shrink: 0; }
+  .prov-chip .chip-name { font-size: 12px; font-weight: 500; color: rgba(0,0,0,0.6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: capitalize; }
+  .prov-chip .chip-dot {
+    width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; margin-left: auto;
+  }
+  .prov-chip .chip-dot.on { background: #34c759; }
+  .prov-chip .chip-dot.off { background: rgba(0,0,0,0.12); }
+
+  /* Activity summary */
+  .activity-card {
+    padding: 16px;
+  }
+  .activity-title { font-size: 12px; font-weight: 600; color: rgba(0,0,0,0.35); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }
+  .activity-empty { font-size: 13px; color: rgba(0,0,0,0.25); text-align: center; padding: 12px; }
+  .activity-item {
+    display: flex; align-items: center; gap: 10px; padding: 8px 0;
+    border-bottom: 1px solid rgba(0,0,0,0.03);
+    font-size: 12px; color: rgba(0,0,0,0.5);
+  }
+  .activity-item:last-child { border-bottom: none; }
+  .activity-dot { width: 6px; height: 6px; border-radius: 50%; background: #007aff; flex-shrink: 0; }
+  .activity-text { flex: 1; }
+  .activity-cost { color: #ff9500; font-weight: 600; font-size: 11px; }
+
+  /* Provider tabs (inside Providers tab) */
   .prov-tabs {
     display: flex; gap: 0; border-bottom: 1px solid rgba(0,0,0,0.06);
     overflow-x: auto; -webkit-overflow-scrolling: touch;
@@ -78,17 +155,13 @@
     transition: all 0.15s; position: relative;
     background: none; border-top: none; border-left: none; border-right: none;
     font-family: inherit; font-size: 14px; font-weight: 500;
-    color: rgba(0,0,0,0.4);
+    color: rgba(0,0,0,0.4); min-height: 44px;
   }
   .prov-tab:hover { background: rgba(0,0,0,0.02); }
-  .prov-tab.active {
-    color: #007aff; border-bottom-color: #007aff; font-weight: 600;
-  }
+  .prov-tab.active { color: #007aff; border-bottom-color: #007aff; font-weight: 600; }
   .prov-tab img { width: 24px; height: 24px; border-radius: 0; object-fit: contain; flex-shrink: 0; }
   .prov-tab .tab-name { white-space: nowrap; text-transform: capitalize; }
-  .prov-tab .tab-dot {
-    width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
-  }
+  .prov-tab .tab-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
   .prov-tab .tab-dot.on { background: #34c759; }
   .prov-tab .tab-dot.off { background: rgba(0,0,0,0.15); }
 
@@ -111,28 +184,26 @@
     padding: 6px 14px; border-radius: 10px; border: none;
     background: rgba(0,0,0,0.04); color: rgba(0,0,0,0.6);
     font-size: 13px; cursor: pointer; font-family: inherit; transition: all 0.15s;
+    min-height: 44px; display: inline-flex; align-items: center; justify-content: center;
   }
   .btn:hover { background: rgba(0,0,0,0.08); }
   .btn.pri { background: rgba(0,113,227,0.85); color: #fff; box-shadow: 0 2px 8px rgba(0,113,227,0.15); }
   .btn.pri:hover { background: rgba(0,113,227,0.95); }
-  .btn.sm { padding: 5px 10px; font-size: 12px; }
+  .btn.sm { padding: 5px 10px; font-size: 12px; min-height: 36px; }
 
   /* Model list */
-  .model-list { display: flex; flex-direction: column; gap: 6px; }
+  .model-list { display: flex; flex-direction: column; gap: 6px; max-height: 420px; overflow-y: auto; }
   .model-item {
     display: flex; align-items: center; gap: 10px;
     padding: 12px 14px; border-radius: 12px; cursor: pointer;
     border: 1.5px solid transparent; background: rgba(0,0,0,0.02);
-    transition: all 0.15s;
+    transition: all 0.15s; min-height: 44px;
   }
   .model-item:hover { background: rgba(0,0,0,0.04); }
   .model-item.selected { border-color: rgba(0,113,227,0.4); background: rgba(0,113,227,0.04); }
   .model-main { flex: 1; min-width: 0; }
   .model-row1 { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-  .model-id {
-    font-family: inherit; font-size: 13px; font-weight: 600;
-    color: rgba(0,0,0,0.75);
-  }
+  .model-id { font-family: inherit; font-size: 13px; font-weight: 600; color: rgba(0,0,0,0.75); }
   .tier {
     padding: 2px 7px; border-radius: 6px; font-size: 10px; font-weight: 700;
     letter-spacing: 0.3px; white-space: nowrap; text-transform: uppercase; flex-shrink: 0;
@@ -146,13 +217,8 @@
     background: rgba(0,0,0,0.05);
   }
   .cap svg { width: 11px; height: 11px; fill: none; stroke: rgba(0,0,0,0.4); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-  .model-row2 {
-    display: flex; align-items: baseline; gap: 8px; margin-top: 3px;
-  }
-  .model-price {
-    font-family: inherit; font-size: 11px;
-    color: rgba(0,0,0,0.3); white-space: nowrap; flex-shrink: 0;
-  }
+  .model-row2 { display: flex; align-items: baseline; gap: 8px; margin-top: 3px; }
+  .model-price { font-family: inherit; font-size: 11px; color: rgba(0,0,0,0.3); white-space: nowrap; flex-shrink: 0; }
   .model-desc { font-size: 11px; color: rgba(0,0,0,0.35); line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
   /* Test area */
@@ -172,7 +238,6 @@
   .result.load { display: block; background: rgba(0,113,227,0.06); color: #1e40af; }
 
   /* Projects */
-  .glass + .glass { margin-top: 16px; }
   .card-head {
     padding: 14px 16px; display: flex; align-items: center; justify-content: space-between;
     border-bottom: 1px solid rgba(0,0,0,0.05);
@@ -182,6 +247,7 @@
   .proj-item {
     display: flex; align-items: center; gap: 12px;
     padding: 12px 0; border-bottom: 1px solid rgba(0,0,0,0.04);
+    min-height: 44px;
   }
   .proj-item:last-child { border-bottom: none; }
   .proj-name { font-size: 15px; font-weight: 600; color: rgba(0,0,0,0.8); }
@@ -208,38 +274,55 @@
   .proj-empty { padding: 24px; text-align: center; color: rgba(0,0,0,0.25); font-size: 13px; }
   .proj-date { font-size: 11px; color: rgba(0,0,0,0.2); margin-top: 2px; }
 
-  /* Usage */
-  .usage-head { display: flex; align-items: center; gap: 8px; padding: 14px 16px; border-bottom: 1px solid rgba(0,0,0,0.05); }
-  .usage-head h2 { font-size: 14px; font-weight: 600; color: rgba(0,0,0,0.5); flex: 1; }
-  .usage-head select { padding: 4px 8px; border-radius: 8px; border: 1px solid rgba(0,0,0,0.06); font-size: 12px; font-family: inherit; background: rgba(255,255,255,0.6); color: rgba(0,0,0,0.6); }
-  .usage-body { padding: 12px 16px; }
-  .usage-total {
-    display: flex; gap: 12px; margin-bottom: 14px;
+  /* Usage Tab */
+  .usage-controls {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px;
   }
-  .usage-stat {
-    flex: 1; padding: 10px 12px; border-radius: 10px; background: rgba(0,0,0,0.02);
+  .usage-controls select {
+    padding: 7px 12px; border-radius: 10px; border: 1px solid rgba(0,0,0,0.06);
+    font-size: 13px; font-family: inherit; background: rgba(255,255,255,0.7);
+    color: rgba(0,0,0,0.6); min-height: 36px; cursor: pointer;
   }
-  .usage-stat .u-label { font-size: 10px; color: rgba(0,0,0,0.3); text-transform: uppercase; font-weight: 600; }
-  .usage-stat .u-val { font-size: 22px; font-weight: 700; color: rgba(0,0,0,0.7); margin-top: 2px; }
-  .usage-stat .u-val.cost { color: #ff9500; font-size: 26px; }
-  .usage-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  .usage-table th {
-    text-align: left; padding: 6px 8px; color: rgba(0,0,0,0.35); font-weight: 600;
-    border-bottom: 1px solid rgba(0,0,0,0.06); font-size: 10px; text-transform: uppercase;
-  }
-  .usage-table td { padding: 8px; border-bottom: 1px solid rgba(0,0,0,0.03); color: rgba(0,0,0,0.6); }
-  .usage-table tr:last-child td { border-bottom: none; }
-  .usage-table .num { text-align: right; font-variant-numeric: tabular-nums; }
-  .usage-table .proj-badge { font-weight: 600; color: rgba(0,0,0,0.75); }
-  .usage-table .cost-cell { color: #ff9500; font-weight: 700; font-size: 14px; }
-  .usage-empty { padding: 24px; text-align: center; color: rgba(0,0,0,0.2); font-size: 13px; }
+  .usage-controls select:focus { outline: none; border-color: rgba(0,113,227,0.3); }
+  .usage-controls .spacer { flex: 1; }
 
-  /* Project group in usage */
+  .usage-stats { display: flex; gap: 10px; margin-bottom: 14px; }
+  .usage-stat {
+    flex: 1; padding: 12px 14px; border-radius: 14px;
+    background: rgba(255,255,255,0.7);
+    border: 1px solid rgba(255,255,255,0.8);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.03);
+  }
+  .usage-stat .u-label { font-size: 10px; color: rgba(0,0,0,0.3); text-transform: uppercase; font-weight: 600; letter-spacing: 0.3px; }
+  .usage-stat .u-val { font-size: 20px; font-weight: 700; color: rgba(0,0,0,0.7); margin-top: 3px; }
+  .usage-stat .u-val.cost { color: #ff9500; }
+
+  /* Charts */
+  .chart-row { display: flex; gap: 14px; margin-bottom: 14px; }
+  .chart-card {
+    flex: 1; padding: 16px; border-radius: 16px;
+    background: rgba(255,255,255,0.7);
+    border: 1px solid rgba(255,255,255,0.8);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.03);
+    min-width: 0;
+  }
+  .chart-title { font-size: 12px; font-weight: 600; color: rgba(0,0,0,0.35); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; }
+  .chart-canvas-wrap { position: relative; width: 100%; }
+  .chart-canvas-wrap canvas { width: 100%; display: block; }
+  .chart-tooltip {
+    position: absolute; display: none; padding: 8px 12px; border-radius: 10px;
+    background: rgba(0,0,0,0.75); color: #fff; font-size: 11px;
+    pointer-events: none; white-space: nowrap; z-index: 10;
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  }
+
+  /* Usage detail table */
   .usage-proj-group { margin-bottom: 8px; }
   .usage-proj-header {
     display: flex; align-items: center; gap: 10px; padding: 10px 12px;
     border-radius: 10px; background: rgba(0,0,0,0.025); cursor: pointer;
-    transition: background 0.15s; user-select: none;
+    transition: background 0.15s; user-select: none; min-height: 44px;
   }
   .usage-proj-header:hover { background: rgba(0,0,0,0.05); }
   .usage-proj-arrow {
@@ -253,6 +336,20 @@
   .usage-proj-detail { overflow: hidden; transition: max-height 0.25s ease; }
   .usage-proj-detail.collapsed { max-height: 0 !important; }
   .usage-proj-detail table { margin-top: 4px; }
+
+  .usage-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .usage-table th {
+    text-align: left; padding: 6px 8px; color: rgba(0,0,0,0.35); font-weight: 600;
+    border-bottom: 1px solid rgba(0,0,0,0.06); font-size: 10px; text-transform: uppercase;
+  }
+  .usage-table td { padding: 8px; border-bottom: 1px solid rgba(0,0,0,0.03); color: rgba(0,0,0,0.6); }
+  .usage-table tr:last-child td { border-bottom: none; }
+  .usage-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .usage-table .cost-cell { color: #ff9500; font-weight: 700; font-size: 14px; }
+  .usage-empty { padding: 24px; text-align: center; color: rgba(0,0,0,0.2); font-size: 13px; }
+  .usage-detail-wrap {
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+  }
 
   /* Modal */
   .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.15); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); z-index: 100; align-items: center; justify-content: center; }
@@ -270,6 +367,7 @@
     border: 1px solid rgba(0,0,0,0.06); font-size: 14px;
     font-family: inherit;
     color: rgba(0,0,0,0.7); background: rgba(255,255,255,0.6);
+    min-height: 44px;
   }
   .fg input:focus, .fg select:focus { outline: none; border-color: rgba(0,113,227,0.3); }
   .modal-foot { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
@@ -285,21 +383,37 @@
 
   /* Mobile */
   @media (max-width: 600px) {
-    .container { padding: 20px 16px; }
-    .header h1 { font-size: 22px; }
-    .header .sub { font-size: 12px; }
-    .stats { gap: 8px; }
-    .stat { padding: 12px 14px; }
-    .stat .val { font-size: 18px; }
+    .container { padding: 12px 14px; }
+    .header h1 { font-size: 18px; }
+    .header-uptime { display: none; }
+    .main-tab { padding: 10px 4px; font-size: 11px; }
+    .main-tab .tab-icon { font-size: 14px; }
+    .stats { gap: 6px; }
+    .stat { padding: 10px 12px; border-radius: 12px; }
+    .stat .val { font-size: 17px; }
     .stat .label { font-size: 10px; }
+    .prov-grid { grid-template-columns: repeat(2, 1fr); gap: 6px; }
+    .prov-chip { padding: 8px 10px; }
     .prov-tab { padding: 12px 14px; gap: 7px; }
     .prov-tab img { width: 22px; height: 22px; }
     .prov-tab .tab-name { font-size: 13px; }
     .prov-panel { padding: 14px; }
     .model-item { padding: 10px 12px; }
     .model-id { font-size: 12px; }
-    .model-desc { font-size: 11px; -webkit-line-clamp: 2; }
-    .chat-entry { padding: 14px; font-size: 15px; }
+    .model-desc { font-size: 11px; }
+    .chart-row { flex-direction: column; }
+    .usage-stats { flex-wrap: wrap; }
+    .usage-stat { flex: 1 1 45%; min-width: 0; }
+    .usage-controls { gap: 6px; }
+    .usage-controls select { font-size: 12px; padding: 6px 8px; }
+    .usage-detail-wrap { margin: 0 -14px; padding: 0 14px; }
+  }
+
+  @media (max-width: 400px) {
+    .prov-grid { grid-template-columns: repeat(2, 1fr); }
+    .usage-stats { gap: 6px; }
+    .usage-stat { padding: 10px; }
+    .usage-stat .u-val { font-size: 17px; }
   }
 </style>
 </head>
@@ -307,58 +421,109 @@
 <div class="container">
 
   <div class="header">
-    <div class="header-text">
-      <h1>AI Gateway</h1>
-      <div class="sub">API Proxy Dashboard</div>
-    </div>
-    <button class="btn sm" onclick="openM()" style="flex-shrink:0">+ Key</button>
+    <h1>AI Gateway</h1>
+    <span class="header-badge on" id="hBadge">Online</span>
+    <span class="header-uptime" id="hUptime"></span>
+    <div class="header-spacer"></div>
+    <a href="/chat" class="header-chat">Start Chat</a>
   </div>
 
-  <div class="stats">
-    <div class="stat"><div class="label">Status</div><div class="val green" id="sStatus">--</div></div>
-    <div class="stat"><div class="label">Providers</div><div class="val" id="sCount">--</div></div>
-    <div class="stat"><div class="label">Uptime</div><div class="val" id="sUp" style="font-size:16px">--</div></div>
+  <div class="main-tabs">
+    <button class="main-tab active" data-tab="overview"><span class="tab-icon">&#9673;</span> Overview</button>
+    <button class="main-tab" data-tab="providers"><span class="tab-icon">&#9881;</span> Providers</button>
+    <button class="main-tab" data-tab="projects"><span class="tab-icon">&#9919;</span> Projects</button>
+    <button class="main-tab" data-tab="usage"><span class="tab-icon">&#9636;</span> Usage</button>
   </div>
 
-  <a href="/chat" class="chat-entry">Start Chat &rarr;</a>
-
-  <div class="glass">
-    <div class="prov-tabs" id="provTabs"></div>
-    <div class="prov-panel" id="provPanel">
-      <div style="padding:20px;color:rgba(0,0,0,0.3);text-align:center;font-size:13px">Loading...</div>
+  <!-- Overview Tab -->
+  <div class="tab-content active" id="tab-overview">
+    <div class="stats">
+      <div class="stat"><div class="label">Status</div><div class="val green" id="sStatus">--</div></div>
+      <div class="stat"><div class="label">Providers</div><div class="val" id="sCount">--</div></div>
+      <div class="stat"><div class="label">Total Requests</div><div class="val" id="sTotalReqs">--</div></div>
     </div>
-  </div>
-
-  <div class="glass">
-    <div class="card-head">
-      <h2>Project Keys</h2>
-      <button class="btn sm pri" onclick="openProjM()">+ Project</button>
-    </div>
-    <div class="proj-list" id="projList">
-      <div class="proj-empty">Loading...</div>
+    <div class="prov-grid" id="provGrid"></div>
+    <div class="glass">
+      <div class="activity-card">
+        <div class="activity-title">Recent Activity</div>
+        <div id="activityList"><div class="activity-empty">Loading...</div></div>
+      </div>
     </div>
   </div>
 
-  <div class="glass">
-    <div class="usage-head">
-      <h2>Usage & Cost</h2>
-      <select id="usageCurrency" onchange="loadUsage()" style="margin-right:4px">
-        <option value="USD">USD $</option>
-        <option value="CNY">CNY ¥</option>
+  <!-- Providers Tab -->
+  <div class="tab-content" id="tab-providers">
+    <div class="glass">
+      <div class="prov-tabs" id="provTabs"></div>
+      <div class="prov-panel" id="provPanel">
+        <div style="padding:20px;color:rgba(0,0,0,0.3);text-align:center;font-size:13px">Loading...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Projects Tab -->
+  <div class="tab-content" id="tab-projects">
+    <div class="glass">
+      <div class="card-head">
+        <h2>Project Keys</h2>
+        <button class="btn sm pri" onclick="openProjM()">+ Project</button>
+      </div>
+      <div class="proj-list" id="projList">
+        <div class="proj-empty">Loading...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Usage Tab -->
+  <div class="tab-content" id="tab-usage">
+    <div class="usage-controls">
+      <select id="usageProject" onchange="loadUsage()">
+        <option value="">All Projects</option>
       </select>
       <select id="usageDays" onchange="loadUsage()">
         <option value="1">Today</option>
         <option value="7" selected>7 days</option>
         <option value="30">30 days</option>
       </select>
+      <div class="spacer"></div>
+      <select id="usageCurrency" onchange="renderUsage()">
+        <option value="USD">USD $</option>
+        <option value="CNY">CNY &yen;</option>
+      </select>
     </div>
-    <div class="usage-body" id="usageBody">
-      <div class="usage-empty">Loading...</div>
+    <div class="usage-stats" id="usageStats">
+      <div class="usage-stat"><div class="u-label">Requests</div><div class="u-val" id="uReqs">--</div></div>
+      <div class="usage-stat"><div class="u-label">Cost</div><div class="u-val cost" id="uCost">--</div></div>
+      <div class="usage-stat"><div class="u-label">Input Tokens</div><div class="u-val" id="uIn">--</div></div>
+      <div class="usage-stat"><div class="u-label">Output Tokens</div><div class="u-val" id="uOut">--</div></div>
+    </div>
+    <div class="chart-row">
+      <div class="chart-card">
+        <div class="chart-title">Daily Requests</div>
+        <div class="chart-canvas-wrap">
+          <canvas id="trendChart" height="180"></canvas>
+          <div class="chart-tooltip" id="trendTip"></div>
+        </div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Cost by Model</div>
+        <div class="chart-canvas-wrap">
+          <canvas id="barChart" height="180"></canvas>
+          <div class="chart-tooltip" id="barTip"></div>
+        </div>
+      </div>
+    </div>
+    <div class="glass">
+      <div class="card-head"><h2>Detail Breakdown</h2></div>
+      <div style="padding:12px 16px" id="usageBody">
+        <div class="usage-empty">Loading...</div>
+      </div>
     </div>
   </div>
 
 </div>
 
+<!-- Modals -->
 <div class="overlay" id="overlay">
   <div class="modal">
     <h3 id="mTitle">Add API Key</h3>
@@ -391,6 +556,9 @@ let providers = [];
 let activeProv = '';
 let selectedModel = '';
 let adminAuthed = false;
+let cachedUsageSummary = null;
+let cachedUsageDetail = null;
+let projectsList = [];
 
 function esc(s) {
   const d = document.createElement('div');
@@ -398,7 +566,24 @@ function esc(s) {
   return d.innerHTML;
 }
 
-// Admin auth
+// ============================================================
+// Tab Navigation
+// ============================================================
+document.querySelectorAll('.main-tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const tab = btn.dataset.tab;
+    document.querySelectorAll('.main-tab').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + tab).classList.add('active');
+    if (tab === 'usage' && adminAuthed) loadUsage();
+    if (tab === 'projects' && adminAuthed) loadProjects();
+  });
+});
+
+// ============================================================
+// Admin Auth
+// ============================================================
 async function checkAuth() {
   try {
     const d = await fetch(B + '/admin/auth').then(r => r.json());
@@ -430,6 +615,9 @@ document.getElementById('loginSecret').addEventListener('keydown', e => {
   if (e.key === 'Enter') doLogin();
 });
 
+// ============================================================
+// Core Data Loading
+// ============================================================
 async function load() {
   try {
     const [h, p] = await Promise.all([
@@ -438,32 +626,102 @@ async function load() {
     ]);
     providers = p;
 
+    const isOk = h.status === 'ok';
+    const badge = document.getElementById('hBadge');
+    badge.textContent = isOk ? 'Online' : 'Offline';
+    badge.className = 'header-badge ' + (isOk ? 'on' : 'off');
+
     const s = document.getElementById('sStatus');
-    s.textContent = h.status === 'ok' ? 'Online' : 'Error';
-    s.className = 'val ' + (h.status === 'ok' ? 'green' : '');
+    s.textContent = isOk ? 'Online' : 'Offline';
+    s.className = 'val ' + (isOk ? 'green' : 'red');
+
     const a = p.filter(x => x.available).length;
     document.getElementById('sCount').textContent = `${a}/${p.length}`;
 
     fetch(B + '/admin/uptime').then(r => r.json()).then(d => {
-      document.getElementById('sUp').textContent = d.uptime;
+      document.getElementById('hUptime').textContent = d.uptime;
     }).catch(() => {});
 
-    renderTabs();
+    renderProvGrid();
+    renderProvTabs();
     if (!activeProv || !p.find(x => x.name === activeProv)) {
       activeProv = (p.find(x => x.available) || p[0])?.name || '';
     }
     switchProv(activeProv);
-  } catch (e) {
+  } catch {
     document.getElementById('sStatus').textContent = 'Offline';
-    document.getElementById('sStatus').className = 'val';
+    document.getElementById('sStatus').className = 'val red';
+    document.getElementById('hBadge').textContent = 'Offline';
+    document.getElementById('hBadge').className = 'header-badge off';
   }
 }
 
-function renderTabs() {
+// ============================================================
+// Overview: Provider Grid
+// ============================================================
+function renderProvGrid() {
+  document.getElementById('provGrid').innerHTML = providers.map(p => `
+    <div class="prov-chip" onclick="switchToProvider('${p.name}')">
+      <img src="/logos/${p.name}.png" alt="${esc(p.name)}">
+      <span class="chip-name">${esc(p.name)}</span>
+      <span class="chip-dot ${p.available ? 'on' : 'off'}"></span>
+    </div>
+  `).join('');
+}
+
+function switchToProvider(name) {
+  activeProv = name;
+  document.querySelectorAll('.main-tab').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  document.querySelector('[data-tab="providers"]').classList.add('active');
+  document.getElementById('tab-providers').classList.add('active');
+  switchProv(name);
+}
+
+// ============================================================
+// Overview: Activity
+// ============================================================
+async function loadActivity() {
+  if (!adminAuthed) return;
+  try {
+    const d = await fetch(`${B}/admin/usage?days=1`).then(r => r.json());
+    const el = document.getElementById('activityList');
+    const totalReqs = d.reduce((s, r) => s + r.count, 0);
+    document.getElementById('sTotalReqs').textContent = totalReqs.toLocaleString();
+
+    if (!d.length) {
+      el.innerHTML = '<div class="activity-empty">No activity today</div>';
+      return;
+    }
+    // Aggregate by project+model, sort by count desc, show top 6
+    const agg = {};
+    for (const r of d) {
+      const k = r.project + '|' + r.model;
+      if (!agg[k]) agg[k] = { project: r.project, model: r.model, count: 0, cost: 0 };
+      agg[k].count += r.count;
+      agg[k].cost += r.cost;
+    }
+    const items = Object.values(agg).sort((a, b) => b.count - a.count).slice(0, 6);
+    el.innerHTML = items.map(it => `
+      <div class="activity-item">
+        <span class="activity-dot"></span>
+        <span class="activity-text">${esc(projDisplayName(it.project))} &mdash; ${esc(it.model)} &times;${it.count}</span>
+        <span class="activity-cost">${fmtCost(it.cost, 'USD')}</span>
+      </div>
+    `).join('');
+  } catch {
+    document.getElementById('activityList').innerHTML = '<div class="activity-empty">Failed to load</div>';
+  }
+}
+
+// ============================================================
+// Provider Tabs & Panel
+// ============================================================
+function renderProvTabs() {
   document.getElementById('provTabs').innerHTML = providers.map(p => `
     <button class="prov-tab${p.name === activeProv ? ' active' : ''}" onclick="switchProv('${p.name}')">
-      <img src="/logos/${p.name}.png" alt="${p.name}">
-      <span class="tab-name">${p.name}</span>
+      <img src="/logos/${p.name}.png" alt="${esc(p.name)}">
+      <span class="tab-name">${esc(p.name)}</span>
       <span class="tab-dot ${p.available ? 'on' : 'off'}"></span>
     </button>
   `).join('');
@@ -471,7 +729,7 @@ function renderTabs() {
 
 async function switchProv(name) {
   activeProv = name;
-  renderTabs();
+  renderProvTabs();
   const prov = providers.find(p => p.name === name);
   if (!prov) return;
 
@@ -480,9 +738,9 @@ async function switchProv(name) {
   if (!prov.available) {
     panel.innerHTML = `
       <div class="prov-info-bar">
-        <span class="prov-url">${prov.baseUrl}</span>
+        <span class="prov-url">${esc(prov.baseUrl)}</span>
         <span class="tag off">No Key</span>
-        <button class="btn sm" onclick="openM('${name}')">Add Key</button>
+        <button class="btn sm" onclick="openM('${esc(name)}')">Add Key</button>
       </div>
       <div style="padding:20px;text-align:center;color:rgba(0,0,0,0.25);font-size:13px">
         Configure API key to enable this provider
@@ -503,29 +761,29 @@ async function switchProv(name) {
 
   panel.innerHTML = `
     <div class="prov-info-bar">
-      <span class="prov-url">${prov.baseUrl}</span>
+      <span class="prov-url">${esc(prov.baseUrl)}</span>
       <span class="tag on">Active</span>
-      <button class="btn sm" onclick="openM('${name}')">Edit</button>
+      <button class="btn sm" onclick="openM('${esc(name)}')">Edit</button>
     </div>
     <div class="model-list">
       ${models.map((m, i) => `
-        <div class="model-item${i === 0 ? ' selected' : ''}" data-id="${m.id}" onclick="selectModel('${m.id}')">
+        <div class="model-item${i === 0 ? ' selected' : ''}" data-id="${esc(m.id)}" onclick="selectModel('${esc(m.id)}')">
           <div class="model-main">
             <div class="model-row1">
-              <span class="model-id">${m.id}</span>
-              <span class="tier ${m.tier}">${m.tier}</span>
-              ${(m.caps || []).filter(c => c !== 'text').map(c => `<span class="cap" title="${capLabel[c] || c}">${capSvg[c] || ''}</span>`).join('')}
+              <span class="model-id">${esc(m.id)}</span>
+              <span class="tier ${esc(m.tier)}">${esc(m.tier)}</span>
+              ${(m.caps || []).filter(c => c !== 'text').map(c => `<span class="cap" title="${esc(capLabel[c] || c)}">${capSvg[c] || ''}</span>`).join('')}
               <span class="model-price">${m.price ? '$'+m.price.in+' / $'+m.price.out : ''}</span>
             </div>
             <div class="model-row2">
-              <span class="model-desc">${m.desc}</span>
+              <span class="model-desc">${esc(m.desc || '')}</span>
             </div>
           </div>
         </div>`).join('')}
     </div>
     <div class="test-bar">
       <button class="btn pri" onclick="testConn()">Test Selected</button>
-      <span style="font-size:12px;color:rgba(0,0,0,0.3)" id="testHint">${selectedModel}</span>
+      <span style="font-size:12px;color:rgba(0,0,0,0.3)" id="testHint">${esc(selectedModel)}</span>
     </div>
     <div class="result" id="tRes"></div>`;
 }
@@ -558,14 +816,17 @@ async function testConn() {
     const d = await fetch(`${B}/admin/test/${activeProv}?model=${encodeURIComponent(selectedModel)}`).then(r => r.json());
     if (d.success) {
       el.className = 'result ok';
-      el.textContent = `${d.model} — "${d.reply}" (${d.latency}ms)`;
+      el.textContent = `${esc(d.model)} — "${esc(d.reply)}" (${d.latency}ms)`;
     } else {
       el.className = 'result err';
-      el.textContent = `${selectedModel}: ${d.error}`;
+      el.textContent = `${esc(selectedModel)}: ${esc(d.error)}`;
     }
   } catch (e) { el.className = 'result err'; el.textContent = e.message; }
 }
 
+// ============================================================
+// Key Modal
+// ============================================================
 function openM(p) {
   document.getElementById('overlay').classList.add('show');
   document.getElementById('mTitle').textContent = p ? `Edit ${p}` : 'Add API Key';
@@ -591,16 +852,23 @@ async function saveK() {
   } catch (e) { showT(e.message, 'error'); }
 }
 
+// ============================================================
+// Toast
+// ============================================================
 function showT(m, t) {
   const e = document.getElementById('toast');
   e.textContent = m; e.className = `toast ${t} show`;
   setTimeout(() => e.classList.remove('show'), 2500);
 }
 
-// --- Projects ---
+// ============================================================
+// Projects
+// ============================================================
 async function loadProjects() {
   try {
     const projs = await fetch(B + '/admin/projects').then(r => r.json());
+    projectsList = projs;
+    updateProjectDropdown();
     const list = document.getElementById('projList');
     if (!projs.length) {
       list.innerHTML = '<div class="proj-empty">No projects yet. Add one to generate an API key.</div>';
@@ -627,6 +895,14 @@ async function loadProjects() {
         </div>`;
     }).join('');
   } catch {}
+}
+
+function updateProjectDropdown() {
+  const sel = document.getElementById('usageProject');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">All Projects</option>' +
+    projectsList.map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join('');
+  sel.value = cur;
 }
 
 function openProjM() {
@@ -673,18 +949,21 @@ function copyKey(key) {
   navigator.clipboard.writeText(key).then(() => showT('Key copied', 'success'));
 }
 
-// --- Usage ---
+// ============================================================
+// Usage
+// ============================================================
 let rateData = { USD_CNY: 7.24, updatedAt: null };
 fetch(B + '/admin/rate').then(r => r.json()).then(d => { rateData = d; }).catch(() => {});
 
 function fmtTokens(n) {
+  if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
   if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
   if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
   return n.toString();
 }
 
 function fmtCost(c, currency) {
-  const sym = currency === 'CNY' ? '¥' : '$';
+  const sym = currency === 'CNY' ? '\u00a5' : '$';
   const val = currency === 'CNY' ? c * rateData.USD_CNY : c;
   if (val >= 100) return sym + val.toFixed(1);
   if (val >= 1) return sym + val.toFixed(2);
@@ -693,7 +972,7 @@ function fmtCost(c, currency) {
   return sym + '0';
 }
 
-const usageOpenState = {}; // track which projects are expanded
+const usageOpenState = {};
 
 function projDisplayName(name) {
   if (name === '_chat') return 'Built-in Chat';
@@ -703,62 +982,113 @@ function projDisplayName(name) {
 
 async function loadUsage() {
   const days = document.getElementById('usageDays').value;
-  const currency = document.getElementById('usageCurrency').value;
-  const body = document.getElementById('usageBody');
+  const projectFilter = document.getElementById('usageProject').value;
   try {
-    const d = await fetch(`${B}/admin/usage/summary?days=${days}`).then(r => r.json());
-    if (d.totalRequests === 0) {
-      body.innerHTML = '<div class="usage-empty">No usage data yet</div>';
-      return;
+    const [summary, detail] = await Promise.all([
+      fetch(`${B}/admin/usage/summary?days=${days}`).then(r => r.json()),
+      fetch(`${B}/admin/usage?days=${days}${projectFilter ? '&project=' + encodeURIComponent(projectFilter) : ''}`).then(r => r.json())
+    ]);
+    cachedUsageSummary = summary;
+    cachedUsageDetail = detail;
+
+    // Filter summary by project if needed
+    if (projectFilter && summary.byProject) {
+      const filtered = {};
+      if (summary.byProject[projectFilter]) {
+        filtered[projectFilter] = summary.byProject[projectFilter];
+      }
+      const tReqs = Object.values(filtered).reduce((s, p) => s + p.requests, 0);
+      const tCost = Object.values(filtered).reduce((s, p) => s + p.cost, 0);
+      const tIn = Object.values(filtered).reduce((s, p) => s + p.inputTokens, 0);
+      const tOut = Object.values(filtered).reduce((s, p) => s + p.outputTokens, 0);
+      cachedUsageSummary = { ...summary, totalRequests: tReqs, totalCost: tCost, totalInputTokens: tIn, totalOutputTokens: tOut, byProject: filtered };
     }
 
-    const rateNote = currency === 'CNY' ? `<span style="font-size:10px;color:rgba(0,0,0,0.25);margin-left:6px">1 USD = ${rateData.USD_CNY.toFixed(2)} CNY</span>` : '';
-
-    // Build per-project collapsible groups
-    let groups = '';
-    const projEntries = Object.entries(d.byProject).sort((a, b) => b[1].cost - a[1].cost);
-    for (const [projName, p] of projEntries) {
-      const isOpen = usageOpenState[projName] !== false; // default open
-      const modelEntries = Object.entries(p.models).sort((a, b) => b[1].cost - a[1].cost);
-
-      let rows = '';
-      for (const [modelKey, m] of modelEntries) {
-        const cacheRate = m.inputTokens > 0 ? Math.round((m.cacheHitTokens / m.inputTokens) * 100) : 0;
-        rows += `<tr>
-          <td>${modelKey}</td>
-          <td class="num">${m.count}</td>
-          <td class="num">${fmtTokens(m.inputTokens)}${cacheRate > 0 ? ' <span style="color:#34c759;font-size:10px">(' + cacheRate + '%hit)</span>' : ''}</td>
-          <td class="num">${fmtTokens(m.outputTokens)}</td>
-          <td class="num cost-cell">${fmtCost(m.cost, currency)}</td>
-        </tr>`;
+    // Compute totalInputTokens / totalOutputTokens from byProject if not present
+    if (cachedUsageSummary.totalInputTokens === undefined) {
+      let tIn = 0, tOut = 0;
+      for (const p of Object.values(cachedUsageSummary.byProject || {})) {
+        tIn += p.inputTokens || 0;
+        tOut += p.outputTokens || 0;
       }
+      cachedUsageSummary.totalInputTokens = tIn;
+      cachedUsageSummary.totalOutputTokens = tOut;
+    }
 
-      groups += `
-        <div class="usage-proj-group">
-          <div class="usage-proj-header" onclick="toggleUsageProj('${esc(projName)}')">
-            <span class="usage-proj-arrow${isOpen ? ' open' : ''}" id="arrow_${esc(projName)}">&#9654;</span>
-            <span class="usage-proj-name">${esc(projDisplayName(projName))}</span>
-            <div class="usage-proj-summary">
-              <span>${p.requests} reqs</span>
-              <span class="cost-val">${fmtCost(p.cost, currency)}</span>
-            </div>
+    renderUsage();
+  } catch {
+    document.getElementById('usageBody').innerHTML = '<div class="usage-empty">Failed to load usage</div>';
+  }
+}
+
+function renderUsage() {
+  const currency = document.getElementById('usageCurrency').value;
+  const summary = cachedUsageSummary;
+  const detail = cachedUsageDetail;
+  if (!summary) return;
+
+  // Summary cards
+  document.getElementById('uReqs').textContent = summary.totalRequests.toLocaleString();
+  document.getElementById('uCost').textContent = fmtCost(summary.totalCost, currency);
+  document.getElementById('uIn').textContent = fmtTokens(summary.totalInputTokens || 0);
+  document.getElementById('uOut').textContent = fmtTokens(summary.totalOutputTokens || 0);
+
+  // Charts
+  renderTrendChart(detail, currency);
+  renderBarChart(summary, currency);
+
+  // Detail table
+  renderUsageDetail(summary, currency);
+}
+
+function renderUsageDetail(d, currency) {
+  const body = document.getElementById('usageBody');
+  if (d.totalRequests === 0) {
+    body.innerHTML = '<div class="usage-empty">No usage data yet</div>';
+    return;
+  }
+
+  let groups = '';
+  const projEntries = Object.entries(d.byProject).sort((a, b) => b[1].cost - a[1].cost);
+  for (const [projName, p] of projEntries) {
+    const isOpen = usageOpenState[projName] !== false;
+    const modelEntries = Object.entries(p.models).sort((a, b) => b[1].cost - a[1].cost);
+
+    let rows = '';
+    for (const [modelKey, m] of modelEntries) {
+      const cacheRate = m.inputTokens > 0 ? Math.round((m.cacheHitTokens / m.inputTokens) * 100) : 0;
+      rows += `<tr>
+        <td>${esc(modelKey)}</td>
+        <td class="num">${m.count}</td>
+        <td class="num">${fmtTokens(m.inputTokens)}${cacheRate > 0 ? ' <span style="color:#34c759;font-size:10px">(' + cacheRate + '%hit)</span>' : ''}</td>
+        <td class="num">${fmtTokens(m.outputTokens)}</td>
+        <td class="num cost-cell">${fmtCost(m.cost, currency)}</td>
+      </tr>`;
+    }
+
+    groups += `
+      <div class="usage-proj-group">
+        <div class="usage-proj-header" onclick="toggleUsageProj('${esc(projName)}')">
+          <span class="usage-proj-arrow${isOpen ? ' open' : ''}" id="arrow_${esc(projName)}">&#9654;</span>
+          <span class="usage-proj-name">${esc(projDisplayName(projName))}</span>
+          <div class="usage-proj-summary">
+            <span>${p.requests} reqs</span>
+            <span class="cost-val">${fmtCost(p.cost, currency)}</span>
           </div>
-          <div class="usage-proj-detail${isOpen ? '' : ' collapsed'}" id="detail_${projName}">
+        </div>
+        <div class="usage-proj-detail${isOpen ? '' : ' collapsed'}" id="detail_${esc(projName)}">
+          <div class="usage-detail-wrap">
             <table class="usage-table">
               <thead><tr><th>Model</th><th style="text-align:right">Reqs</th><th style="text-align:right">Input</th><th style="text-align:right">Output</th><th style="text-align:right">Cost</th></tr></thead>
               <tbody>${rows}</tbody>
             </table>
           </div>
-        </div>`;
-    }
+        </div>
+      </div>`;
+  }
 
-    body.innerHTML = `
-      <div class="usage-total">
-        <div class="usage-stat"><div class="u-label">Requests</div><div class="u-val">${d.totalRequests}</div></div>
-        <div class="usage-stat"><div class="u-label">Est. Cost${rateNote}</div><div class="u-val cost">${fmtCost(d.totalCost, currency)}</div></div>
-      </div>
-      ${groups}`;
-  } catch { body.innerHTML = '<div class="usage-empty">Failed to load usage</div>'; }
+  const rateNote = currency === 'CNY' ? `<span style="font-size:10px;color:rgba(0,0,0,0.25)">1 USD = ${rateData.USD_CNY.toFixed(2)} CNY</span>` : '';
+  body.innerHTML = rateNote + groups;
 }
 
 function toggleUsageProj(name) {
@@ -770,17 +1100,317 @@ function toggleUsageProj(name) {
   if (arrow) arrow.classList.toggle('open', !isOpen);
 }
 
-// Init: check auth first, then load everything
+// ============================================================
+// Charts (pure Canvas)
+// ============================================================
+const provColors = {
+  deepseek: '#4a90d9', openai: '#10a37f', anthropic: '#d4a574',
+  gemini: '#4285f4', kimi: '#ff6b35', doubao: '#ff4757',
+  qwen: '#7c3aed', minimax: '#f59e0b'
+};
+
+function getProviderColor(modelKey) {
+  const prov = modelKey.split('/')[0];
+  return provColors[prov] || '#007aff';
+}
+
+function renderTrendChart(detail, currency) {
+  const canvas = document.getElementById('trendChart');
+  if (!canvas) return;
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.parentElement.getBoundingClientRect();
+  const w = rect.width;
+  const h = 180;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  canvas.style.width = w + 'px';
+  canvas.style.height = h + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  // Aggregate by date
+  const byDate = {};
+  if (detail && detail.length) {
+    for (const r of detail) {
+      if (!byDate[r.date]) byDate[r.date] = { count: 0, cost: 0 };
+      byDate[r.date].count += r.count;
+      byDate[r.date].cost += r.cost;
+    }
+  }
+
+  const days = parseInt(document.getElementById('usageDays').value) || 7;
+  const dates = [];
+  const now = new Date();
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - i);
+    dates.push(d.toISOString().slice(0, 10));
+  }
+
+  const counts = dates.map(d => (byDate[d] || {}).count || 0);
+  const costs = dates.map(d => (byDate[d] || {}).cost || 0);
+  const maxVal = Math.max(...counts, 1);
+
+  const padL = 40, padR = 12, padT = 16, padB = 32;
+  const cw = w - padL - padR;
+  const ch = h - padT - padB;
+
+  ctx.clearRect(0, 0, w, h);
+
+  // Y axis labels
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.font = '10px -apple-system, sans-serif';
+  ctx.textAlign = 'right';
+  for (let i = 0; i <= 4; i++) {
+    const v = Math.round(maxVal * (1 - i / 4));
+    const y = padT + (ch * i / 4);
+    ctx.fillText(v.toString(), padL - 6, y + 3);
+  }
+
+  if (dates.length < 2) {
+    // Single bar for 1 day
+    const barW = Math.min(cw * 0.5, 60);
+    const barH = counts[0] > 0 ? (counts[0] / maxVal) * ch : 0;
+    const bx = padL + cw / 2 - barW / 2;
+    const by = padT + ch - barH;
+    const grad = ctx.createLinearGradient(0, by, 0, padT + ch);
+    grad.addColorStop(0, 'rgba(0,122,255,0.5)');
+    grad.addColorStop(1, 'rgba(0,122,255,0.05)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.roundRect(bx, by, barW, barH, [6, 6, 0, 0]);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.textAlign = 'center';
+    ctx.font = '10px -apple-system, sans-serif';
+    ctx.fillText(dates[0].slice(5), padL + cw / 2, h - 8);
+    // Store hit areas for tooltip
+    canvas._chartData = { type: 'single', dates, counts, costs, x: padL + cw / 2, y: by, w: barW, h: barH };
+    return;
+  }
+
+  // Draw line + fill
+  const pts = dates.map((_, i) => ({
+    x: padL + (i / (dates.length - 1)) * cw,
+    y: padT + ch - (counts[i] / maxVal) * ch
+  }));
+
+  // Gradient fill
+  const grad = ctx.createLinearGradient(0, padT, 0, padT + ch);
+  grad.addColorStop(0, 'rgba(0,122,255,0.2)');
+  grad.addColorStop(1, 'rgba(0,122,255,0.02)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, padT + ch);
+  for (const p of pts) ctx.lineTo(p.x, p.y);
+  ctx.lineTo(pts[pts.length - 1].x, padT + ch);
+  ctx.closePath();
+  ctx.fill();
+
+  // Line
+  ctx.strokeStyle = '#007aff';
+  ctx.lineWidth = 2;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+  ctx.stroke();
+
+  // Dots
+  for (const p of pts) {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+    ctx.fillStyle = '#007aff';
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+
+  // X axis labels (show a few)
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.font = '10px -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  const step = Math.max(1, Math.floor(dates.length / 5));
+  for (let i = 0; i < dates.length; i += step) {
+    ctx.fillText(dates[i].slice(5), pts[i].x, h - 8);
+  }
+  // Always show last
+  if ((dates.length - 1) % step !== 0) {
+    ctx.fillText(dates[dates.length - 1].slice(5), pts[pts.length - 1].x, h - 8);
+  }
+
+  // Store data for tooltip
+  canvas._chartData = { type: 'line', dates, counts, costs, pts, currency };
+}
+
+function renderBarChart(summary, currency) {
+  const canvas = document.getElementById('barChart');
+  if (!canvas) return;
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.parentElement.getBoundingClientRect();
+  const w = rect.width;
+
+  // Aggregate cost by model across all projects
+  const modelCosts = {};
+  if (summary && summary.byProject) {
+    for (const [, p] of Object.entries(summary.byProject)) {
+      for (const [modelKey, m] of Object.entries(p.models)) {
+        if (!modelCosts[modelKey]) modelCosts[modelKey] = 0;
+        modelCosts[modelKey] += m.cost;
+      }
+    }
+  }
+
+  const sorted = Object.entries(modelCosts)
+    .filter(([, c]) => c > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8);
+
+  const barH = 24;
+  const gap = 6;
+  const padL = 10, padR = 10, padT = 4, padB = 4;
+  const h = sorted.length ? padT + sorted.length * (barH + gap) - gap + padB : 60;
+
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  canvas.style.width = w + 'px';
+  canvas.style.height = h + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, h);
+
+  if (!sorted.length) {
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx.font = '13px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('No cost data', w / 2, h / 2 + 4);
+    return;
+  }
+
+  const maxCost = sorted[0][1];
+  const maxBarW = w - padL - padR - 120; // reserve space for label + value
+
+  for (let i = 0; i < sorted.length; i++) {
+    const [modelKey, cost] = sorted[i];
+    const y = padT + i * (barH + gap);
+    const bw = Math.max(4, (cost / maxCost) * maxBarW);
+    const color = getProviderColor(modelKey);
+
+    // Bar
+    ctx.fillStyle = color + '40';
+    ctx.beginPath();
+    ctx.roundRect(padL, y, bw, barH, 6);
+    ctx.fill();
+
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(padL, y, bw, barH, 6);
+    ctx.globalAlpha = 0.7;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // Model name (truncated)
+    const shortName = modelKey.length > 22 ? modelKey.slice(0, 20) + '..' : modelKey;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.font = '11px -apple-system, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(shortName, padL + bw + 8, y + barH / 2 + 4);
+
+    // Cost value
+    ctx.fillStyle = '#ff9500';
+    ctx.font = 'bold 11px -apple-system, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(fmtCost(cost, currency), w - padR, y + barH / 2 + 4);
+  }
+
+  canvas._chartData = { type: 'bar', sorted, currency };
+}
+
+// Tooltip handlers
+function setupChartTooltip(canvasId, tipId) {
+  const canvas = document.getElementById(canvasId);
+  const tip = document.getElementById(tipId);
+  if (!canvas || !tip) return;
+
+  canvas.addEventListener('mousemove', e => {
+    const data = canvas._chartData;
+    if (!data) { tip.style.display = 'none'; return; }
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    if (data.type === 'line' && data.pts) {
+      let closest = -1, minDist = Infinity;
+      for (let i = 0; i < data.pts.length; i++) {
+        const dx = mx - data.pts[i].x;
+        if (Math.abs(dx) < minDist) { minDist = Math.abs(dx); closest = i; }
+      }
+      if (closest >= 0 && minDist < 30) {
+        const currency = document.getElementById('usageCurrency').value;
+        tip.innerHTML = `<div style="font-weight:600">${data.dates[closest]}</div><div>${data.counts[closest]} requests</div><div style="color:#ffb740">${fmtCost(data.costs[closest], currency)}</div>`;
+        tip.style.display = 'block';
+        let tx = data.pts[closest].x + 12;
+        if (tx + 140 > rect.width) tx = data.pts[closest].x - 140;
+        tip.style.left = tx + 'px';
+        tip.style.top = (data.pts[closest].y - 10) + 'px';
+      } else {
+        tip.style.display = 'none';
+      }
+    } else if (data.type === 'single') {
+      const cx = data.x;
+      if (Math.abs(mx - cx) < data.w) {
+        const currency = document.getElementById('usageCurrency').value;
+        tip.innerHTML = `<div style="font-weight:600">${data.dates[0]}</div><div>${data.counts[0]} requests</div><div style="color:#ffb740">${fmtCost(data.costs[0], currency)}</div>`;
+        tip.style.display = 'block';
+        tip.style.left = (cx + 12) + 'px';
+        tip.style.top = (data.y - 10) + 'px';
+      } else {
+        tip.style.display = 'none';
+      }
+    } else {
+      tip.style.display = 'none';
+    }
+  });
+
+  canvas.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+}
+
+// Handle canvas resize
+let resizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    if (cachedUsageDetail && cachedUsageSummary) {
+      const currency = document.getElementById('usageCurrency').value;
+      renderTrendChart(cachedUsageDetail, currency);
+      renderBarChart(cachedUsageSummary, currency);
+    }
+  }, 150);
+});
+
+// ============================================================
+// Init
+// ============================================================
 (async () => {
-  await load(); // health/providers are public
+  await load();
   const authed = await checkAuth();
   if (authed) {
     loadProjects();
     loadUsage();
+    loadActivity();
   }
+  setupChartTooltip('trendChart', 'trendTip');
+  setupChartTooltip('barChart', 'barTip');
 })();
+
 setInterval(load, 30000);
-setInterval(() => { if (adminAuthed) loadUsage(); }, 10000);
+setInterval(() => {
+  if (adminAuthed) {
+    loadUsage();
+    loadActivity();
+  }
+}, 10000);
 </script>
 </body>
 </html>
