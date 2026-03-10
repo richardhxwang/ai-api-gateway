@@ -8,7 +8,7 @@
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', sans-serif;
+    font-family: 'SF Pro Display', 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
     min-height: 100vh; min-height: 100dvh;
     background: #f2f2f7;
     color: #1c1c1e;
@@ -204,7 +204,7 @@
   .model-item.selected { border-color: rgba(0,113,227,0.4); background: rgba(0,113,227,0.04); }
   .model-main { flex: 1; min-width: 0; }
   .model-row1 { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-  .model-id { font-family: inherit; font-size: 13px; font-weight: 600; color: rgba(0,0,0,0.75); }
+  .model-id { font-family: 'SF Mono', 'Menlo', monospace; font-size: 13px; font-weight: 600; color: rgba(0,0,0,0.82); letter-spacing: -0.3px; }
   .tier {
     padding: 2px 7px; border-radius: 6px; font-size: 10px; font-weight: 700;
     letter-spacing: 0.3px; white-space: nowrap; text-transform: uppercase; flex-shrink: 0;
@@ -253,11 +253,19 @@
   .proj-item:hover { background: rgba(0,0,0,0.04); }
   .proj-name { font-size: 13px; font-weight: 600; color: rgba(0,0,0,0.75); }
   .proj-key {
-    font-size: 11px; color: rgba(0,0,0,0.25); margin-top: 1px;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px;
-    cursor: pointer; font-family: inherit;
+    font-size: 11px; color: rgba(0,0,0,0.3); margin-top: 3px;
+    cursor: pointer; font-family: 'SF Pro Display', -apple-system, sans-serif;
+    display: inline-flex; align-items: center; gap: 4px;
+    transition: color 0.15s;
   }
-  .proj-key:hover { color: rgba(0,0,0,0.45); }
+  .proj-key:hover { color: rgba(0,0,0,0.5); }
+  .proj-key .key-icon { width: 12px; height: 12px; opacity: 0.4; }
+  .proj-key .key-text {
+    font-family: 'SF Mono', 'Menlo', monospace; font-size: 10px;
+    background: rgba(0,0,0,0.04); padding: 2px 8px; border-radius: 6px;
+    letter-spacing: -0.3px; color: rgba(0,0,0,0.5);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px;
+  }
   .proj-info { flex: 1; min-width: 0; }
   .proj-acts { display: flex; gap: 4px; flex-shrink: 0; }
   .proj-toggle {
@@ -296,7 +304,7 @@
     box-shadow: 0 1px 4px rgba(0,0,0,0.03);
   }
   .usage-stat .u-label { font-size: 10px; color: rgba(0,0,0,0.3); text-transform: uppercase; font-weight: 600; letter-spacing: 0.3px; }
-  .usage-stat .u-val { font-size: 20px; font-weight: 700; color: rgba(0,0,0,0.7); margin-top: 3px; overflow-x: auto; white-space: nowrap; scrollbar-width: thin; }
+  .usage-stat .u-val { font-size: 20px; font-weight: 700; color: rgba(0,0,0,0.7); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .usage-stat .u-val::-webkit-scrollbar { height: 2px; }
   .usage-stat .u-val::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 1px; }
   .usage-stat .u-val.cost { color: #ff9500; }
@@ -349,11 +357,11 @@
   .usage-table td { padding: 8px; border-bottom: 1px solid rgba(0,0,0,0.03); color: rgba(0,0,0,0.6); }
   .usage-table tr:last-child td { border-bottom: none; }
   .usage-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .usage-table .cost-cell { color: #ff9500; font-weight: 700; font-size: 14px; white-space: nowrap; }
+  .usage-table .cost-cell { color: #ff9500; font-weight: 700; font-size: 14px; white-space: nowrap; padding-right: 16px; }
   .usage-table { min-width: 500px; }
   .usage-empty { padding: 24px; text-align: center; color: rgba(0,0,0,0.2); font-size: 13px; }
   .usage-detail-wrap {
-    overflow-x: auto; -webkit-overflow-scrolling: touch;
+    overflow-x: auto; -webkit-overflow-scrolling: touch; padding-right: 2px;
   }
 
   /* Modal */
@@ -410,12 +418,17 @@
     .prov-url { font-size: 10px; }
     .model-list { gap: 4px; }
     .model-item { padding: 8px 10px; border-radius: 10px; gap: 8px; }
-    .model-id { font-size: 12px; }
+    .model-id { font-size: 12px; font-weight: 700; }
     .model-row1 { gap: 4px; }
     .model-row2 { gap: 4px; margin-top: 2px; }
     .model-price { font-size: 10px; }
     .tier { font-size: 9px; padding: 1px 5px; }
-    .model-desc { font-size: 11px; }
+    .model-desc { font-size: 10px; }
+    .proj-item { padding: 10px; border-bottom: 1px solid rgba(0,0,0,0.04); }
+    .proj-acts { gap: 2px; }
+    .proj-acts .btn.sm { padding: 4px 8px; font-size: 11px; min-height: 30px; border-radius: 8px; }
+    .proj-key { font-size: 10px; }
+    .proj-key .key-text { max-width: 140px; }
     .chart-row { flex-direction: column; }
     .usage-stats { flex-wrap: wrap; }
     .usage-stat { flex: 1 1 45%; min-width: 0; }
@@ -502,8 +515,16 @@
       </select>
       <div class="spacer"></div>
       <select id="usageCurrency" onchange="renderUsage()">
-        <option value="USD">USD $</option>
-        <option value="CNY">CNY &yen;</option>
+        <option value="USD">$ USD</option>
+        <option value="CNY">&yen; CNY</option>
+        <option value="EUR">&euro; EUR</option>
+        <option value="GBP">&pound; GBP</option>
+        <option value="JPY">&yen; JPY</option>
+        <option value="KRW">&#8361; KRW</option>
+        <option value="HKD">HK$ HKD</option>
+        <option value="SGD">S$ SGD</option>
+        <option value="AUD">A$ AUD</option>
+        <option value="CAD">C$ CAD</option>
       </select>
     </div>
     <div class="usage-stats" id="usageStats">
@@ -899,11 +920,13 @@ async function loadProjects() {
           <button class="proj-toggle ${p.enabled ? 'on' : 'off'}" onclick="toggleProj('${safeName}', ${!p.enabled})"></button>
           <div class="proj-info">
             <div class="proj-name">${safeName}</div>
-            <div class="proj-key" onclick="copyKey('${safeKey}')" title="Click to copy">${esc(masked)}</div>
+            <div class="proj-key" onclick="revealAndCopy(this, '${safeKey}')" title="Click to reveal & copy">
+              <svg class="key-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              <span class="key-label">Click to reveal key</span>
+            </div>
             <div class="proj-date">Created ${esc(date)}</div>
           </div>
           <div class="proj-acts">
-            <button class="btn sm" onclick="copyKey('${safeKey}')">Copy</button>
             <button class="btn sm" onclick="regenProj('${safeName}')">Regen</button>
             <button class="btn sm" onclick="delProj('${safeName}')" style="color:#ff3b30">Del</button>
           </div>
@@ -964,11 +987,42 @@ function copyKey(key) {
   navigator.clipboard.writeText(key).then(() => showT('Key copied', 'success'));
 }
 
+function revealAndCopy(el, key) {
+  // Reveal key text
+  const label = el.querySelector('.key-label');
+  const existing = el.querySelector('.key-text');
+  if (existing) {
+    // Already revealed — just copy
+    copyKey(key);
+    return;
+  }
+  if (label) label.remove();
+  const span = document.createElement('span');
+  span.className = 'key-text';
+  span.textContent = key;
+  el.appendChild(span);
+  // Auto copy
+  copyKey(key);
+  // Auto hide after 5s
+  setTimeout(() => {
+    span.remove();
+    const lbl = document.createElement('span');
+    lbl.className = 'key-label';
+    lbl.textContent = 'Click to reveal key';
+    el.appendChild(lbl);
+  }, 5000);
+}
+
 // ============================================================
 // Usage
 // ============================================================
-let rateData = { USD_CNY: 7.24, updatedAt: null };
-fetch(B + '/admin/rate').then(r => r.json()).then(d => { rateData = d; }).catch(() => {});
+let rateData = { rates: { CNY: 7.24, EUR: 0.92, GBP: 0.79, JPY: 149.5, KRW: 1330, HKD: 7.82, SGD: 1.34, AUD: 1.53, CAD: 1.36 }, updatedAt: null };
+const CURRENCY_SYMBOLS = { USD: '$', CNY: '\u00a5', EUR: '\u20ac', GBP: '\u00a3', JPY: '\u00a5', KRW: '\u20a9', HKD: 'HK$', SGD: 'S$', AUD: 'A$', CAD: 'C$' };
+fetch(B + '/admin/rate').then(r => r.json()).then(d => {
+  // Support both old format {USD_CNY} and new format {rates}
+  if (d.rates) { rateData = d; }
+  else if (d.USD_CNY) { rateData = { rates: { CNY: d.USD_CNY }, updatedAt: d.updatedAt }; }
+}).catch(() => {});
 
 function fmtTokens(n) {
   if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
@@ -978,12 +1032,17 @@ function fmtTokens(n) {
 }
 
 function fmtCost(c, currency) {
-  const sym = currency === 'CNY' ? '\u00a5' : '$';
-  const val = currency === 'CNY' ? c * rateData.USD_CNY : c;
-  if (val >= 100) return sym + val.toFixed(1);
-  if (val >= 1) return sym + val.toFixed(2);
+  const sym = CURRENCY_SYMBOLS[currency] || '$';
+  const rate = (currency && currency !== 'USD' && rateData.rates[currency]) ? rateData.rates[currency] : 1;
+  const val = c * rate;
+  // Integer currencies (JPY, KRW) — no decimals needed
+  const noDecimal = currency === 'JPY' || currency === 'KRW';
+  if (val >= 1000) return sym + Math.round(val).toLocaleString();
+  if (val >= 100) return sym + (noDecimal ? Math.round(val) : val.toFixed(1));
+  if (val >= 1) return sym + (noDecimal ? Math.round(val) : val.toFixed(2));
   if (val >= 0.01) return sym + val.toFixed(3);
-  if (val > 0) return sym + val.toFixed(4);
+  if (val >= 0.001) return sym + val.toFixed(4);
+  if (val > 0) return sym + val.toExponential(1);
   return sym + '0';
 }
 
@@ -1102,7 +1161,7 @@ function renderUsageDetail(d, currency) {
       </div>`;
   }
 
-  const rateNote = currency === 'CNY' ? `<span style="font-size:10px;color:rgba(0,0,0,0.25)">1 USD = ${rateData.USD_CNY.toFixed(2)} CNY</span>` : '';
+  const rateNote = (currency && currency !== 'USD' && rateData.rates[currency]) ? `<span style="font-size:10px;color:rgba(0,0,0,0.25)">1 USD = ${rateData.rates[currency].toFixed(currency === 'JPY' || currency === 'KRW' ? 0 : 2)} ${currency}</span>` : '';
   body.innerHTML = rateNote + groups;
 }
 
@@ -1174,7 +1233,7 @@ function renderTrendChart(detail, currency) {
 
   // Y axis labels
   ctx.fillStyle = 'rgba(0,0,0,0.25)';
-  ctx.font = '10px -apple-system, sans-serif';
+  ctx.font = "10px 'SF Pro Display', -apple-system, sans-serif";
   ctx.textAlign = 'right';
   for (let i = 0; i <= 4; i++) {
     const v = Math.round(maxVal * (1 - i / 4));
@@ -1197,7 +1256,7 @@ function renderTrendChart(detail, currency) {
     ctx.fill();
     ctx.fillStyle = 'rgba(0,0,0,0.35)';
     ctx.textAlign = 'center';
-    ctx.font = '10px -apple-system, sans-serif';
+    ctx.font = "10px 'SF Pro Display', -apple-system, sans-serif";
     ctx.fillText(dates[0].slice(5), padL + cw / 2, h - 8);
     // Store hit areas for tooltip
     canvas._chartData = { type: 'single', dates, counts, costs, x: padL + cw / 2, y: by, w: barW, h: barH };
@@ -1244,7 +1303,7 @@ function renderTrendChart(detail, currency) {
 
   // X axis labels (show a few)
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.font = '10px -apple-system, sans-serif';
+  ctx.font = "10px 'SF Pro Display', -apple-system, sans-serif";
   ctx.textAlign = 'center';
   const step = Math.max(1, Math.floor(dates.length / 5));
   for (let i = 0; i < dates.length; i += step) {
@@ -1282,10 +1341,13 @@ function renderBarChart(summary, currency) {
     .sort((a, b) => b[1] - a[1])
     .slice(0, 8);
 
-  const barH = 24;
-  const gap = 6;
+  const isMobile = w < 400;
+  const barH = isMobile ? 18 : 24;
+  const labelH = isMobile ? 16 : 0;
+  const rowH = barH + labelH;
+  const gap = isMobile ? 8 : 6;
   const padL = 10, padR = 10, padT = 4, padB = 4;
-  const h = sorted.length ? padT + sorted.length * (barH + gap) - gap + padB : 60;
+  const h = sorted.length ? padT + sorted.length * (rowH + gap) - gap + padB : 60;
 
   canvas.width = w * dpr;
   canvas.height = h * dpr;
@@ -1297,46 +1359,73 @@ function renderBarChart(summary, currency) {
 
   if (!sorted.length) {
     ctx.fillStyle = 'rgba(0,0,0,0.2)';
-    ctx.font = '13px -apple-system, sans-serif';
+    ctx.font = "13px 'SF Pro Display', -apple-system, sans-serif";
     ctx.textAlign = 'center';
     ctx.fillText('No cost data', w / 2, h / 2 + 4);
     return;
   }
 
   const maxCost = sorted[0][1];
-  const maxBarW = w - padL - padR - 120; // reserve space for label + value
+  const maxTrunc = isMobile ? 28 : 22;
+  const fontSize = isMobile ? 10 : 11;
+  const maxBarW = isMobile ? (w - padL - padR) : (w - padL - padR - 120);
 
   for (let i = 0; i < sorted.length; i++) {
     const [modelKey, cost] = sorted[i];
-    const y = padT + i * (barH + gap);
+    const rowY = padT + i * (rowH + gap);
     const bw = Math.max(4, (cost / maxCost) * maxBarW);
     const color = getProviderColor(modelKey);
+    const shortName = modelKey.length > maxTrunc ? modelKey.slice(0, maxTrunc - 2) + '..' : modelKey;
 
-    // Bar
-    ctx.fillStyle = color + '40';
-    ctx.beginPath();
-    ctx.roundRect(padL, y, bw, barH, 6);
-    ctx.fill();
+    if (isMobile) {
+      // Label row above bar
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.font = fontSize + "px 'SF Mono', Menlo, 'SF Pro Display', -apple-system, sans-serif";
+      ctx.textAlign = 'left';
+      ctx.fillText(shortName, padL, rowY + fontSize);
 
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.roundRect(padL, y, bw, barH, 6);
-    ctx.globalAlpha = 0.7;
-    ctx.fill();
-    ctx.globalAlpha = 1;
+      ctx.fillStyle = '#ff9500';
+      ctx.font = "bold " + fontSize + "px 'SF Pro Display', -apple-system, sans-serif";
+      ctx.textAlign = 'right';
+      ctx.fillText(fmtCost(cost, currency), w - padR, rowY + fontSize);
 
-    // Model name (truncated)
-    const shortName = modelKey.length > 22 ? modelKey.slice(0, 20) + '..' : modelKey;
-    ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    ctx.font = '11px -apple-system, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText(shortName, padL + bw + 8, y + barH / 2 + 4);
+      // Bar below label
+      const barY = rowY + labelH;
+      ctx.fillStyle = color + '40';
+      ctx.beginPath();
+      ctx.roundRect(padL, barY, bw, barH, 5);
+      ctx.fill();
 
-    // Cost value
-    ctx.fillStyle = '#ff9500';
-    ctx.font = 'bold 11px -apple-system, sans-serif';
-    ctx.textAlign = 'right';
-    ctx.fillText(fmtCost(cost, currency), w - padR, y + barH / 2 + 4);
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.roundRect(padL, barY, bw, barH, 5);
+      ctx.globalAlpha = 0.7;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    } else {
+      // Desktop: bar with label beside it
+      ctx.fillStyle = color + '40';
+      ctx.beginPath();
+      ctx.roundRect(padL, rowY, bw, barH, 6);
+      ctx.fill();
+
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.roundRect(padL, rowY, bw, barH, 6);
+      ctx.globalAlpha = 0.7;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.font = fontSize + "px 'SF Pro Display', -apple-system, sans-serif";
+      ctx.textAlign = 'left';
+      ctx.fillText(shortName, padL + bw + 8, rowY + barH / 2 + 4);
+
+      ctx.fillStyle = '#ff9500';
+      ctx.font = "bold " + fontSize + "px 'SF Pro Display', -apple-system, sans-serif";
+      ctx.textAlign = 'right';
+      ctx.fillText(fmtCost(cost, currency), w - padR, rowY + barH / 2 + 4);
+    }
   }
 
   canvas._chartData = { type: 'bar', sorted, currency };

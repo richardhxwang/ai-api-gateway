@@ -8,7 +8,7 @@ const rateLimit = require("express-rate-limit");
 require("dotenv").config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 9471;
 const startTime = Date.now();
 
 // --- Security: Admin secret & internal chat key ---
@@ -75,13 +75,20 @@ function saveProjects(list) {
 let projects = loadProjects();
 
 // --- Exchange rate ---
-let exchangeRate = { USD_CNY: 7.24, updatedAt: null };
+const SUPPORTED_CURRENCIES = ["CNY", "EUR", "GBP", "JPY", "KRW", "HKD", "SGD", "AUD", "CAD"];
+let exchangeRate = { rates: { CNY: 7.24, EUR: 0.92, GBP: 0.79, JPY: 149.5, KRW: 1330, HKD: 7.82, SGD: 1.34, AUD: 1.53, CAD: 1.36 }, updatedAt: null };
 
 function loadRate() {
   try {
     if (fs.existsSync(RATE_FILE)) {
       const saved = JSON.parse(fs.readFileSync(RATE_FILE, "utf8"));
-      if (saved.USD_CNY) exchangeRate = saved;
+      // Support both old format {USD_CNY} and new format {rates}
+      if (saved.rates) {
+        exchangeRate = saved;
+      } else if (saved.USD_CNY) {
+        exchangeRate.rates.CNY = saved.USD_CNY;
+        exchangeRate.updatedAt = saved.updatedAt;
+      }
     }
   } catch {}
 }
@@ -91,11 +98,15 @@ async function fetchExchangeRate() {
   try {
     const resp = await fetch("https://open.er-api.com/v6/latest/USD");
     const data = await resp.json();
-    if (data.result === "success" && data.rates?.CNY) {
-      exchangeRate = { USD_CNY: data.rates.CNY, updatedAt: new Date().toISOString() };
+    if (data.result === "success" && data.rates) {
+      const rates = {};
+      for (const cur of SUPPORTED_CURRENCIES) {
+        if (data.rates[cur]) rates[cur] = data.rates[cur];
+      }
+      exchangeRate = { rates, updatedAt: new Date().toISOString() };
       ensureDataDir();
       fs.writeFileSync(RATE_FILE, JSON.stringify(exchangeRate, null, 2));
-      console.log(`Exchange rate updated: 1 USD = ${exchangeRate.USD_CNY} CNY`);
+      console.log(`Exchange rates updated: ${SUPPORTED_CURRENCIES.map(c => `${c}=${rates[c]}`).join(", ")}`);
     }
   } catch (e) {
     console.error("Failed to fetch exchange rate:", e.message);
@@ -206,10 +217,10 @@ function extractTokensFromSSE(providerName, chunks) {
 
 // --- Provider & model config ---
 const PROVIDERS = {
-  deepseek: { baseUrl: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com", apiKey: process.env.DEEPSEEK_API_KEY },
   openai: { baseUrl: process.env.OPENAI_BASE_URL || "https://api.openai.com", apiKey: process.env.OPENAI_API_KEY },
   anthropic: { baseUrl: process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com", apiKey: process.env.ANTHROPIC_API_KEY },
   gemini: { baseUrl: process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com", apiKey: process.env.GEMINI_API_KEY },
+  deepseek: { baseUrl: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com", apiKey: process.env.DEEPSEEK_API_KEY },
   kimi: { baseUrl: process.env.KIMI_BASE_URL || "https://api.moonshot.cn", apiKey: process.env.KIMI_API_KEY },
   doubao: { baseUrl: process.env.DOUBAO_BASE_URL || "https://ark.cn-beijing.volces.com/api/v3", apiKey: process.env.DOUBAO_API_KEY },
   qwen: { baseUrl: process.env.QWEN_BASE_URL || "https://dashscope.aliyuncs.com/compatible-mode", apiKey: process.env.QWEN_API_KEY },
@@ -217,10 +228,6 @@ const PROVIDERS = {
 };
 
 const MODELS = {
-  deepseek: [
-    { id: "deepseek-chat", tier: "economy", price: { in: 0.27, cacheIn: 0.018, out: 1.10 }, caps: ["text"], desc: "Chat, translation, summarization, bulk text processing" },
-    { id: "deepseek-reasoner", tier: "flagship", price: { in: 0.55, cacheIn: 0.14, out: 2.19 }, caps: ["text"], desc: "Math proofs, competitive programming, CoT deep reasoning" },
-  ],
   openai: [
     { id: "gpt-4.1-nano", tier: "economy", price: { in: 0.10, cacheIn: 0.025, out: 0.40 }, caps: ["text"], desc: "Classification, extraction, routing — lowest cost, 1M context" },
     { id: "gpt-4.1-mini", tier: "economy", price: { in: 0.40, cacheIn: 0.10, out: 1.60 }, caps: ["text", "image"], desc: "Summarization, simple code gen, 1M context, vision" },
@@ -241,6 +248,10 @@ const MODELS = {
     { id: "gemini-2.5-flash-lite", tier: "economy", price: { in: 0.075, cacheIn: 0.01875, out: 0.30 }, freeRPD: 1500, caps: ["text", "image"], desc: "High-throughput summarization/classification — 1500 free/day" },
     { id: "gemini-2.5-flash", tier: "standard", price: { in: 0.15, cacheIn: 0.0375, out: 0.60 }, freeRPD: 500, caps: ["text", "image", "audio", "video", "pdf"], desc: "Code gen, math reasoning, 1M context — 500 free/day" },
     { id: "gemini-2.5-pro", tier: "flagship", price: { in: 1.25, cacheIn: 0.3125, out: 10.00 }, freeRPD: 25, caps: ["text", "image", "audio", "video", "pdf"], desc: "Multimodal video analysis, 1M context — 25 free/day" },
+  ],
+  deepseek: [
+    { id: "deepseek-chat", tier: "economy", price: { in: 0.27, cacheIn: 0.018, out: 1.10 }, caps: ["text"], desc: "Chat, translation, summarization, bulk text processing" },
+    { id: "deepseek-reasoner", tier: "flagship", price: { in: 0.55, cacheIn: 0.14, out: 2.19 }, caps: ["text"], desc: "Math proofs, competitive programming, CoT deep reasoning" },
   ],
   kimi: [
     { id: "moonshot-v1-8k", tier: "economy", price: { in: 1.67, cacheIn: 0.42, out: 1.67 }, caps: ["text"], desc: "Fast chat, 8K context" },

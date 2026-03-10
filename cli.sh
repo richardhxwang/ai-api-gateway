@@ -35,7 +35,7 @@ if [[ -f "${SCRIPT_DIR}/.env" ]]; then
   }
 fi
 
-GATEWAY_URL="${GATEWAY_URL:-http://localhost:3000}"
+GATEWAY_URL="${GATEWAY_URL:-http://localhost:9471}"
 # Strip trailing slash
 GATEWAY_URL="${GATEWAY_URL%/}"
 
@@ -517,7 +517,7 @@ cmd_help() {
   echo ""
   echo -e "${BOLD}Config:${RESET}"
   echo -e "  Environment variables or ${CYAN}~/.aigateway${RESET} file:"
-  echo -e "    ${DIM}GATEWAY_URL=http://localhost:3000${RESET}"
+  echo -e "    ${DIM}GATEWAY_URL=http://localhost:9471${RESET}"
   echo -e "    ${DIM}GATEWAY_SECRET=your-admin-secret${RESET}"
   echo ""
   echo -e "  Also reads ${CYAN}ADMIN_SECRET${RESET} from ${CYAN}.env${RESET} in the script directory."

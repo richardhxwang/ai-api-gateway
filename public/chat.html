@@ -188,11 +188,9 @@ async function onCProvChange() {
   if (!modelsCache[prov]) {
     modelsCache[prov] = await fetch(`${B}/models/${prov}`).then(r => r.json());
   }
-  const capTag = { image: '[img]', audio: '[aud]', video: '[vid]', pdf: '[pdf]' };
   const sel = document.getElementById('cModel');
   sel.innerHTML = modelsCache[prov].map(m => {
-    const caps = (m.caps || []).filter(c => c !== 'text').map(c => capTag[c] || '').join(' ');
-    return `<option value="${m.id}">${m.id}${caps ? '  ' + caps : ''}</option>`;
+    return `<option value="${m.id}">${m.id}</option>`;
   }).join('');
 }
 

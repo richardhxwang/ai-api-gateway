@@ -43,7 +43,7 @@ if (fs.existsSync(homeConfig)) {
   }
 }
 
-if (!GATEWAY_URL) GATEWAY_URL = "http://localhost:3000";
+if (!GATEWAY_URL) GATEWAY_URL = "http://localhost:9471";
 GATEWAY_URL = GATEWAY_URL.replace(/\/$/, "");
 
 // --- ANSI helpers ---

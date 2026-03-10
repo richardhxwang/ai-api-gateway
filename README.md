@@ -2,75 +2,26 @@
 
 A self-hosted, multi-provider AI API gateway with usage tracking, cost estimation, and a built-in dashboard.
 
-One container. All your AI providers behind a single endpoint.
+Nginx + Express.js. All your AI providers behind a single endpoint with hot maintenance.
 
 ## Architecture
 
-```mermaid
-graph LR
-  subgraph Clients
-    A1[🟢 Your Apps<br/>FurNote, etc.]
-    A2[🔵 Built-in Chat]
-    A3[🟡 Dashboard]
-  end
-
-  subgraph Cloudflare
-    CF[☁️ Tunnel + Access<br/>OAuth · WAF]
-  end
-
-  subgraph Gateway["🐳 AI API Gateway Container"]
-    direction TB
-    AUTH[🔐 Auth<br/>Admin Secret · Project Keys]
-    RL[⚡ Rate Limiter<br/>Per-IP · Per-Endpoint]
-    PROXY[🔀 Proxy Router<br/>Path Rewrite · Header Injection]
-    USAGE[📊 Usage Tracker<br/>Cache-Aware · Free Tier]
-    ADMIN[⚙️ Admin API<br/>Projects · Keys · Config]
-    UI[🖥️ Dashboard UI<br/>Providers · Usage · Cost]
-  end
-
-  subgraph Providers["AI Providers"]
-    P1[🟦 DeepSeek]
-    P2[🟩 OpenAI]
-    P3[🟧 Anthropic]
-    P4[🟥 Gemini]
-    P5[🟪 Kimi]
-    P6[🔶 Doubao]
-    P7[🔷 Qwen]
-    P8[⬡ MiniMax]
-  end
-
-  subgraph Storage["📁 Persistent Data"]
-    D1[projects.json]
-    D2[usage.json]
-    D3[exchange-rate.json]
-  end
-
-  A1 -->|X-Project-Key| CF
-  A2 -->|Internal Key| CF
-  A3 -->|Admin Cookie| CF
-  CF --> AUTH
-  AUTH --> RL --> PROXY
-  PROXY --> P1 & P2 & P3 & P4 & P5 & P6 & P7 & P8
-  PROXY --> USAGE
-  ADMIN --> Storage
-  USAGE --> Storage
-
-  style Gateway fill:#1a1a2e,stroke:#16213e,color:#fff
-  style Providers fill:#0d1117,stroke:#30363d,color:#fff
-  style Cloudflare fill:#f38020,stroke:#f38020,color:#fff
-  style Clients fill:#161b22,stroke:#30363d,color:#fff
-  style Storage fill:#0d1117,stroke:#30363d,color:#fff
-```
+<p align="center">
+  <img src="public/architecture.svg" alt="AI API Gateway Architecture" width="100%"/>
+</p>
 
 ## Features
 
-- **Multi-Provider Proxy** — Single `/v1/{provider}/` endpoint routes to DeepSeek, OpenAI, Anthropic, Gemini, Kimi, Doubao, Qwen, MiniMax
+- **Multi-Provider Proxy** — Single `/v1/{provider}/` endpoint routes to OpenAI, Anthropic, Gemini, DeepSeek, Kimi, Doubao, Qwen, MiniMax
+- **Hot Maintenance** — Nginx reverse proxy serves cached pages & maintenance responses during app restarts
 - **Project Key Auth** — Unique `X-Project-Key` per project, CRUD via dashboard
 - **Usage Tracking** — Per-project, per-model request/token counts with cache hit/miss breakdown
 - **Cost Estimation** — Cache-aware pricing (input/cached-input/output), Gemini free tier support, USD/CNY toggle with auto exchange rate
+- **Dashboard** — 4-tab SPA with Canvas charts, mobile responsive, Apple HIG style
 - **Built-in Chat** — SSE streaming chat interface supporting all providers
+- **CLI & TUI** — Terminal tools (`cli.sh` for quick commands, `tui.js` for full-screen interface)
 - **Security** — Admin auth (cookie + token), rate limiting, CORS restriction, input sanitization, graceful shutdown
-- **Docker-Native** — Single container, healthcheck, Cloudflare Tunnel ready, volume-persisted data
+- **Docker-Native** — Nginx + Express + Cloudflare Tunnel, healthcheck, volume-persisted data
 - **Zero-Downtime Config** — Change API keys, add providers via dashboard without restart
 
 ## Quick Start
@@ -98,7 +49,7 @@ GEMINI_API_KEY=AIzaSyxxx
 # MINIMAX_API_KEY=xxx
 
 # Server
-PORT=3000
+PORT=9471
 ADMIN_SECRET=your-admin-password
 
 # Cloudflare Tunnel (optional)
@@ -116,8 +67,8 @@ npm install
 node server.js
 ```
 
-Dashboard: `http://localhost:3000`
-Chat: `http://localhost:3000/chat`
+Dashboard: `http://localhost:9471`
+Chat: `http://localhost:9471/chat`
 
 ## API Reference
 
@@ -129,7 +80,7 @@ All AI provider APIs are accessible via:
 POST /v1/{provider}/v1/chat/completions
 ```
 
-**Providers:** `deepseek`, `openai`, `anthropic`, `gemini`, `kimi`, `doubao`, `qwen`, `minimax`
+**Providers:** `openai`, `anthropic`, `gemini`, `deepseek`, `kimi`, `doubao`, `qwen`, `minimax`
 
 **Authentication:** Include `X-Project-Key` header or `Authorization: Bearer {project-key}`
 
@@ -208,18 +159,23 @@ newprovider: [
 
 ```
 ├── server.js            # Express server — proxy, auth, usage tracking, admin API
+├── nginx/
+│   └── nginx.conf       # Reverse proxy — cache, failover, maintenance pages
 ├── public/
-│   ├── index.html       # Dashboard — providers, projects, usage & cost
+│   ├── index.html       # Dashboard — 4-tab SPA with Canvas charts
 │   ├── chat.html        # Built-in chat interface with SSE streaming
-│   ├── favicon.svg       # Site icon
-│   └── logos/            # Provider logo assets
-├── data/                 # Persistent state (Docker volume)
-│   ├── projects.json     # Project keys
-│   ├── usage.json        # Usage & token counts
+│   ├── architecture.svg # Architecture diagram
+│   ├── favicon.svg      # Site icon
+│   └── logos/           # Provider logo assets (128×128 PNG)
+├── cli.sh               # CLI tool — status, providers, test, usage
+├── tui.js               # TUI tool — full-screen terminal dashboard
+├── data/                # Persistent state (Docker volume)
+│   ├── projects.json    # Project keys
+│   ├── usage.json       # Usage & token counts
 │   └── exchange-rate.json
 ├── Dockerfile
-├── docker-compose.yml
-├── .env                  # API keys & config (git-ignored)
+├── docker-compose.yml   # Nginx + Express + Cloudflare Tunnel
+├── .env                 # API keys & config (git-ignored)
 └── .gitignore
 ```
 
