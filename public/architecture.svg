@@ -72,7 +72,7 @@
     <text x="60" y="46" text-anchor="middle" font-size="22" fill="#fff">☁</text>
     <text x="60" y="82" text-anchor="middle" font-size="12" font-weight="600" fill="#1d1d1f">Cloudflare</text>
     <text x="60" y="96" text-anchor="middle" font-size="10" fill="#86868b">Tunnel + WAF</text>
-    <text x="60" y="110" text-anchor="middle" font-size="9" fill="#aeaeb2">gateway.autorums.com</text>
+    <text x="60" y="110" text-anchor="middle" font-size="9" fill="#aeaeb2">your-domain.com</text>
   </g>
 
   <!-- ==================== DOCKER CONTAINER GROUP ==================== -->
@@ -140,7 +140,7 @@
 
     <!-- Cost Engine -->
     <rect x="36" y="356" width="348" height="28" rx="8" fill="#f0f0f5" stroke="#e5e5ea" stroke-width="0.5"/>
-    <text x="210" y="375" text-anchor="middle" font-size="10" font-weight="500" fill="#86868b">Cost Engine — Cache-aware pricing · USD↔CNY · Gemini free tier deduction</text>
+    <text x="210" y="375" text-anchor="middle" font-size="10" font-weight="500" fill="#86868b">Cost Engine — Cache-aware pricing · Multi-currency · Gemini free tier</text>
 
     <!-- STORAGE -->
     <g transform="translate(20, 408)">
@@ -250,7 +250,7 @@
     <line x1="20" y1="192" x2="284" y2="192" stroke="#e5e5ea" stroke-width="0.5"/>
 
     <text x="20" y="212" font-size="10" fill="#86868b" font-weight="500">8 Providers · Project Keys · CLI + TUI</text>
-    <text x="20" y="228" font-size="10" fill="#86868b" font-weight="500">Canvas Charts · USD↔CNY · Docker Native</text>
+    <text x="20" y="228" font-size="10" fill="#86868b" font-weight="500">Canvas Charts · Multi-currency · Docker Native</text>
     <text x="20" y="244" font-size="10" fill="#aeaeb2">github.com/richardhxwang/ai-api-gateway</text>
   </g>
 
