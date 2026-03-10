@@ -16,6 +16,7 @@ function safeEqual(a, b) {
 const sessions = new Map();
 
 const app = express();
+app.disable("x-powered-by");
 const PORT = process.env.PORT || 9471;
 const startTime = Date.now();
 
@@ -355,7 +356,7 @@ const loginLimiter = rateLimit({
 });
 
 // 4. Body parser with size limit
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json({ limit: "100mb" }));
 
 // 5. Request timeout
 app.use((req, res, next) => {
@@ -706,8 +707,15 @@ app.post("/admin/key", (req, res) => {
   if (!/^[a-zA-Z0-9_\-\.]+$/.test(safeKey)) {
     return res.status(400).json({ success: false, error: "Invalid API key format — only alphanumeric, underscore, hyphen, and dot allowed" });
   }
-  if (safeUrl && !(safeUrl.startsWith("https://") || safeUrl.startsWith("http://localhost"))) {
-    return res.status(400).json({ success: false, error: "Invalid baseUrl — must start with https:// or http://localhost" });
+  if (safeUrl) {
+    if (!(safeUrl.startsWith("https://") || safeUrl.startsWith("http://localhost"))) {
+      return res.status(400).json({ success: false, error: "Invalid baseUrl — must start with https:// or http://localhost" });
+    }
+    // Block private/internal IPs and cloud metadata endpoints
+    const blocked = /^https?:\/\/(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.|127\.|0\.0\.0\.0|localhost:\d+\/admin|\[::1\]|metadata\.google|169\.254\.169\.254)/i;
+    if (blocked.test(safeUrl)) {
+      return res.status(400).json({ success: false, error: "Invalid baseUrl — private/internal addresses are not allowed" });
+    }
   }
 
   PROVIDERS[name].apiKey = safeKey;
@@ -854,6 +862,13 @@ app.use("/v1/:provider", apiLimiter, (req, res, next) => {
   delete req.headers["x-project-key"];
 
   proxyMiddleware(req, res, next);
+});
+
+// Global error handler — prevent stack trace leakage
+app.use((err, req, res, next) => {
+  const status = err.status || err.statusCode || 500;
+  console.error(`[${req.method} ${req.path}] ${err.message}`);
+  res.status(status).json({ error: status === 400 ? "Bad request" : "Internal server error" });
 });
 
 // ============================================================
