@@ -15,6 +15,8 @@ Nginx + Express.js. All your AI providers behind a single endpoint with hot main
 - **Multi-Provider Proxy** — Single `/v1/{provider}/` endpoint routes to OpenAI, Anthropic, Gemini, DeepSeek, Kimi, Doubao, Qwen, MiniMax
 - **Hot Maintenance** — Nginx reverse proxy serves cached pages & maintenance responses during app restarts
 - **Project Key Auth** — Unique `X-Project-Key` per project, CRUD via dashboard
+- **Per-Project Budget** — Set USD spending limits per project (daily/monthly/lifetime), auto-reset, 429 when exceeded
+- **Per-Project Model Allowlist** — Restrict which models each project key can access
 - **Usage Tracking** — Per-project, per-model request/token counts with cache hit/miss breakdown
 - **Cost Estimation** — Cache-aware pricing (input/cached-input/output), Gemini free tier support, multi-currency (USD, CNY, EUR, GBP, JPY, KRW, HKD, SGD, AUD, CAD)
 - **Dashboard** — 4-tab SPA with Canvas charts, mobile responsive, Apple HIG style
@@ -23,6 +25,7 @@ Nginx + Express.js. All your AI providers behind a single endpoint with hot main
 - **Security** — Session-based auth, timing-safe key comparison, SSRF protection, rate limiting, CORS, input sanitization
 - **Docker-Native** — Nginx + Express + Cloudflare Tunnel, healthcheck, volume-persisted data
 - **Zero-Downtime Config** — Change API keys, add providers via dashboard without restart
+- **High Availability** — Cold standby (Plan A, <5MB idle) or hot standby (Plan B) failover with automatic Cloudflare Tunnel switchover
 
 ## Quick Start
 
@@ -119,8 +122,8 @@ curl -X POST https://your-gateway.com/v1/openai/v1/chat/completions \
 | GET | `/admin/uptime` | Server uptime |
 | GET | `/admin/test/{provider}` | Test provider connection |
 | GET | `/admin/projects` | List projects |
-| POST | `/admin/projects` | Create project `{ name }` |
-| PUT | `/admin/projects/{name}` | Update project |
+| POST | `/admin/projects` | Create project `{ name, maxBudgetUsd?, budgetPeriod?, allowedModels? }` |
+| PUT | `/admin/projects/{name}` | Update project (budget, models, enabled, rename) |
 | DELETE | `/admin/projects/{name}` | Delete project |
 | POST | `/admin/projects/{name}/regenerate` | Regenerate key |
 | GET | `/admin/usage?days=7` | Detailed usage data |
@@ -165,7 +168,8 @@ newprovider: [
 | **Anti-Spoofing** | Nginx overrides `X-Forwarded-For` with `$remote_addr`, prevents rate limit bypass |
 | **SSRF Protection** | Private IPs, cloud metadata, and internal addresses blocked in baseUrl |
 | **CORS** | Same-origin only |
-| **Input Sanitization** | Project names validated, `.env` writes sanitized, JSON body capped at 100MB |
+| **Input Sanitization** | Project names validated, `.env` writes sanitized, JSON body capped at 10MB |
+| **Path Allowlist** | Per-provider upstream path validation, normalized to match proxy rewrite rules |
 | **XSS Prevention** | HTML-escaped user data, no stack traces in error responses |
 | **Security Headers** | `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, no `X-Powered-By` |
 | **Docker Hardening** | Non-root user, `.dockerignore` excludes secrets, `server_tokens off` |

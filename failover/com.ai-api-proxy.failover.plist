@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.ai-api-proxy.failover</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/path/to/ai-api-proxy/failover/failover-monitor.sh</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/tmp/ai-api-proxy-failover.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/ai-api-proxy-failover.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PRIMARY_HOST</key>
+    <string>nas-ip</string>
+    <key>PRIMARY_PORT</key>
+    <string>9471</string>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+  </dict>
+</dict>
+</plist>

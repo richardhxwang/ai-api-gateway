@@ -1,0 +1,62 @@
+# Plan B: Hot Standby — both primary and standby run simultaneously.
+# Cloudflare Tunnel handles automatic failover when both connectors use the same token.
+#
+# Usage:
+#   docker compose -f failover/docker-compose.standby.yml up -d
+#
+# How it works:
+#   - Both NAS and Mac Mini run the full stack with the same CF_TUNNEL_TOKEN
+#   - Cloudflare routes traffic to whichever connector is healthy
+#   - If primary goes down, Cloudflare seamlessly routes to standby
+#   - Data sync still needed (run failover/sync-data.sh via cron)
+#
+# Memory cost: ~93MB on standby machine (vs <5MB for Plan A cold standby)
+
+services:
+  nginx:
+    image: nginx:alpine
+    container_name: ai-gateway-nginx-standby
+    restart: unless-stopped
+    ports:
+      - "${GATEWAY_PORT:-9471}:80"
+    volumes:
+      - ../nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - ai-api-proxy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 3s
+
+  ai-api-proxy:
+    build: ..
+    container_name: ai-api-proxy-standby
+    restart: unless-stopped
+    expose:
+      - "9471"
+    env_file:
+      - ../.env
+    environment:
+      - STANDBY_MODE=true
+    volumes:
+      - ../data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9471/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    stop_grace_period: 15s
+
+  cloudflare-aigateway:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflare-aigateway-standby
+    command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN_AIGATEWAY}
+    env_file:
+      - ../.env
+    depends_on:
+      nginx:
+        condition: service_healthy
+    restart: unless-stopped

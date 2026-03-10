@@ -130,6 +130,51 @@ function saveProjects(list) {
 }
 
 let projects = loadProjects();
+let projectsDirty = false;
+setInterval(() => { if (projectsDirty) { saveProjects(projects); projectsDirty = false; } }, 30000);
+
+// --- Budget helpers ---
+function checkBudgetReset(proj) {
+  if (!proj.budgetPeriod || !proj.budgetResetAt) return;
+  if (new Date() >= new Date(proj.budgetResetAt)) {
+    proj.budgetUsedUsd = 0;
+    const now = new Date();
+    if (proj.budgetPeriod === "monthly") {
+      now.setMonth(now.getMonth() + 1);
+      now.setDate(1);
+      now.setHours(0, 0, 0, 0);
+    } else if (proj.budgetPeriod === "daily") {
+      now.setDate(now.getDate() + 1);
+      now.setHours(0, 0, 0, 0);
+    }
+    proj.budgetResetAt = now.toISOString();
+    projectsDirty = true;
+  }
+}
+
+function calcRequestCost(providerName, modelId, tokens) {
+  const info = getModelInfo(providerName, modelId);
+  if (!info?.price) return 0;
+  const uncachedInput = Math.max(0, (tokens.input || 0) - (tokens.cacheHit || 0));
+  return (uncachedInput / 1e6) * info.price.in
+    + ((tokens.cacheHit || 0) / 1e6) * info.price.cacheIn
+    + ((tokens.output || 0) / 1e6) * info.price.out;
+}
+
+function initBudgetResetAt(period) {
+  const now = new Date();
+  if (period === "monthly") {
+    now.setMonth(now.getMonth() + 1);
+    now.setDate(1);
+    now.setHours(0, 0, 0, 0);
+  } else if (period === "daily") {
+    now.setDate(now.getDate() + 1);
+    now.setHours(0, 0, 0, 0);
+  } else {
+    return null;
+  }
+  return now.toISOString();
+}
 
 // --- Exchange rate ---
 const SUPPORTED_CURRENCIES = ["CNY", "EUR", "GBP", "JPY", "KRW", "HKD", "SGD", "AUD", "CAD"];
@@ -601,7 +646,7 @@ app.get("/admin/projects", (req, res) => {
 });
 
 app.post("/admin/projects", (req, res) => {
-  const { name } = req.body;
+  const { name, maxBudgetUsd, budgetPeriod, allowedModels } = req.body;
   if (!validateProjectName(name)) {
     return res.json({ success: false, error: "Invalid project name (max 64 chars, no special chars)" });
   }
@@ -610,6 +655,17 @@ app.post("/admin/projects", (req, res) => {
   }
   const key = "pk_" + crypto.randomBytes(24).toString("hex");
   const project = { name, key, enabled: true, createdAt: new Date().toISOString() };
+  // Phase 1a: Budget enforcement
+  if (maxBudgetUsd != null && maxBudgetUsd > 0) {
+    project.maxBudgetUsd = Number(maxBudgetUsd);
+    project.budgetUsedUsd = 0;
+    project.budgetPeriod = ["monthly", "daily"].includes(budgetPeriod) ? budgetPeriod : null;
+    project.budgetResetAt = initBudgetResetAt(project.budgetPeriod);
+  }
+  // Phase 1b: Model allowlist
+  if (Array.isArray(allowedModels) && allowedModels.length > 0) {
+    project.allowedModels = allowedModels.filter(m => typeof m === "string" && m.length > 0);
+  }
   projects.push(project);
   saveProjects(projects);
   res.json({ success: true, project });
@@ -624,6 +680,33 @@ app.put("/admin/projects/:name", (req, res) => {
       return res.json({ success: false, error: "Invalid project name" });
     }
     proj.name = req.body.newName;
+  }
+  // Phase 1a: Budget update
+  if (req.body.maxBudgetUsd !== undefined) {
+    if (req.body.maxBudgetUsd === null || req.body.maxBudgetUsd === 0) {
+      delete proj.maxBudgetUsd;
+      delete proj.budgetUsedUsd;
+      delete proj.budgetPeriod;
+      delete proj.budgetResetAt;
+    } else {
+      proj.maxBudgetUsd = Number(req.body.maxBudgetUsd);
+      if (proj.budgetUsedUsd == null) proj.budgetUsedUsd = 0;
+    }
+  }
+  if (req.body.budgetPeriod !== undefined) {
+    proj.budgetPeriod = ["monthly", "daily"].includes(req.body.budgetPeriod) ? req.body.budgetPeriod : null;
+    proj.budgetResetAt = initBudgetResetAt(proj.budgetPeriod);
+  }
+  if (req.body.resetBudget === true) {
+    proj.budgetUsedUsd = 0;
+  }
+  // Phase 1b: Model allowlist update
+  if (req.body.allowedModels !== undefined) {
+    if (req.body.allowedModels === null || (Array.isArray(req.body.allowedModels) && req.body.allowedModels.length === 0)) {
+      delete proj.allowedModels;
+    } else if (Array.isArray(req.body.allowedModels)) {
+      proj.allowedModels = req.body.allowedModels.filter(m => typeof m === "string" && m.length > 0);
+    }
   }
   saveProjects(projects);
   res.json({ success: true, project: proj });
@@ -889,6 +972,12 @@ const proxyMiddleware = createProxyMiddleware({
             tokens = extractTokens(providerName, tail);
           }
           recordUsage(projectName, providerName, modelId, tokens);
+          // Phase 1a: Track budget spend
+          if (req._proxyProject?.maxBudgetUsd != null) {
+            const cost = calcRequestCost(providerName, modelId, tokens);
+            req._proxyProject.budgetUsedUsd = (req._proxyProject.budgetUsedUsd || 0) + cost;
+            projectsDirty = true;
+          }
         } catch (e) {
           console.error("Usage tracking error:", e.message);
         }
@@ -925,6 +1014,22 @@ app.use("/v1/:provider", apiLimiter, (req, res, next) => {
       });
     }
     projectName = proj.name;
+
+    // Phase 1b: Model allowlist
+    if (proj.allowedModels?.length && req.body?.model) {
+      if (!proj.allowedModels.includes(req.body.model)) {
+        return res.status(403).json({ error: "Model not allowed for this project" });
+      }
+    }
+
+    // Phase 1a: Budget enforcement
+    checkBudgetReset(proj);
+    if (proj.maxBudgetUsd != null && (proj.budgetUsedUsd || 0) >= proj.maxBudgetUsd) {
+      return res.status(429).json({ error: "Project budget exceeded" });
+    }
+
+    // Stash project ref for budget tracking in onProxyRes
+    req._proxyProject = proj;
   }
 
   const providerName = req.params.provider.toLowerCase();
@@ -938,8 +1043,13 @@ app.use("/v1/:provider", apiLimiter, (req, res, next) => {
     return res.status(403).json({ error: "Provider has no API key configured" });
   }
 
-  // F-04: Validate upstream path against allowlist
-  const incomingSubpath = req.path.replace(new RegExp(`^/v1/${providerName}`, "i"), "");
+  // F-04: Validate upstream path against allowlist (O-02: normalize like pathRewrite)
+  let incomingSubpath = req.path.replace(new RegExp(`^/v1/${providerName}`, "i"), "");
+  if (providerName === "gemini") {
+    incomingSubpath = incomingSubpath.replace(/^\/v1\//, "/v1beta/openai/");
+  } else if (providerName === "doubao") {
+    incomingSubpath = incomingSubpath.replace(/^\/v1\//, "/");
+  }
   const allowedPaths = ALLOWED_UPSTREAM_PATHS[providerName];
   if (allowedPaths && !allowedPaths.some(p => incomingSubpath.startsWith(p))) {
     return res.status(403).json({ error: "Requested API path is not allowed for this provider" });
@@ -997,6 +1107,7 @@ function gracefulShutdown(signal) {
 
   // Save data immediately
   if (usageDirty) saveUsage();
+  if (projectsDirty) { saveProjects(projects); projectsDirty = false; }
 
   // Stop accepting new connections
   server.close(() => {
