@@ -16,7 +16,7 @@ Nginx + Express.js. All your AI providers behind a single endpoint with hot main
 - **Hot Maintenance** — Nginx reverse proxy serves cached pages & maintenance responses during app restarts
 - **Project Key Auth** — Unique `X-Project-Key` per project, CRUD via dashboard
 - **Usage Tracking** — Per-project, per-model request/token counts with cache hit/miss breakdown
-- **Cost Estimation** — Cache-aware pricing (input/cached-input/output), Gemini free tier support, USD/CNY toggle with auto exchange rate
+- **Cost Estimation** — Cache-aware pricing (input/cached-input/output), Gemini free tier support, multi-currency (USD, CNY, EUR, GBP, JPY, KRW, HKD, SGD, AUD, CAD)
 - **Dashboard** — 4-tab SPA with Canvas charts, mobile responsive, Apple HIG style
 - **Built-in Chat** — SSE streaming chat interface supporting all providers
 - **CLI & TUI** — Terminal tools (`cli.sh` for quick commands, `tui.js` for full-screen interface)
@@ -39,10 +39,10 @@ cp .env.example .env
 
 ```env
 # At least one provider key required
-DEEPSEEK_API_KEY=sk-xxx
 OPENAI_API_KEY=sk-xxx
+DEEPSEEK_API_KEY=sk-xxx
 # ANTHROPIC_API_KEY=sk-ant-xxx
-GEMINI_API_KEY=AIzaSyxxx
+# GEMINI_API_KEY=AIzaSyxxx
 # KIMI_API_KEY=sk-xxx
 # DOUBAO_API_KEY=xxx
 # QWEN_API_KEY=sk-xxx
@@ -67,8 +67,15 @@ npm install
 node server.js
 ```
 
-Dashboard: `http://localhost:9471`
-Chat: `http://localhost:9471/chat`
+### 4. Open the Dashboard
+
+Go to `http://localhost:9471` and log in with your `ADMIN_SECRET`.
+
+From the dashboard you can:
+- **Providers** — View status, test connections, update API keys at runtime (no restart needed)
+- **Projects** — Create project keys for your apps, enable/disable/regenerate
+- **Usage** — Monitor per-project and per-model usage, cost breakdown with currency selector
+- **Chat** — Test any provider/model at `http://localhost:9471/chat`
 
 ## API Reference
 
@@ -107,6 +114,7 @@ curl -X POST https://your-gateway.com/v1/openai/v1/chat/completions \
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/admin/login` | Login with `{ secret }`, sets cookie |
+| POST | `/admin/logout` | Clear auth cookie |
 | GET | `/admin/auth` | Check auth status |
 | GET | `/admin/uptime` | Server uptime |
 | GET | `/admin/test/{provider}` | Test provider connection |
@@ -117,7 +125,7 @@ curl -X POST https://your-gateway.com/v1/openai/v1/chat/completions \
 | POST | `/admin/projects/{name}/regenerate` | Regenerate key |
 | GET | `/admin/usage?days=7` | Detailed usage data |
 | GET | `/admin/usage/summary?days=7` | Aggregated usage summary |
-| GET | `/admin/rate` | Current USD/CNY exchange rate |
+| GET | `/admin/rate` | Current exchange rates (multi-currency) |
 | POST | `/admin/key` | Update provider API key at runtime |
 
 ## Adding a New Provider
@@ -139,7 +147,11 @@ newprovider: [
 ],
 ```
 
-3. If the API format differs (like Anthropic), add special handling in the proxy's `pathRewrite` and auth injection sections.
+3. Add `NEWPROVIDER_API_KEY=xxx` to `.env` and `.env.example`.
+
+4. If the API format differs (like Anthropic), add special handling in the proxy's `pathRewrite` and auth injection sections.
+
+> **Tip:** You can also add or update API keys at runtime from the Dashboard's Providers tab — no restart required.
 
 ## Security
 
@@ -148,7 +160,7 @@ newprovider: [
 | **Cloudflare Access** | Google OAuth for dashboard, bypass for `/v1/*` API paths |
 | **Admin Auth** | Cookie + `X-Admin-Token` header, bcrypt-equivalent secret |
 | **Project Keys** | 48-char random hex per project, enable/disable/regenerate |
-| **Rate Limiting** | 120 req/min proxy, 60 req/min admin, 10/15min login |
+| **Rate Limiting** | 600 req/min proxy, 120 req/min admin, 10/15min login |
 | **CORS** | Same-origin only |
 | **Input Sanitization** | Project names validated, .env writes sanitized against injection |
 | **XSS Prevention** | HTML-escaped user data in dashboard |
@@ -173,9 +185,11 @@ newprovider: [
 │   ├── projects.json    # Project keys
 │   ├── usage.json       # Usage & token counts
 │   └── exchange-rate.json
+├── package.json
 ├── Dockerfile
 ├── docker-compose.yml   # Nginx + Express + Cloudflare Tunnel
 ├── .env                 # API keys & config (git-ignored)
+├── .env.example         # Template for .env
 └── .gitignore
 ```
 

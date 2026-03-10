@@ -301,7 +301,7 @@ app.use(cors({
 // 3. Rate limiting
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 120, // 120 req/min per IP for API proxy
+  max: 600, // 600 req/min per IP — sized for AI-driven apps with burst traffic
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.ip,
@@ -310,7 +310,7 @@ const apiLimiter = rateLimit({
 
 const adminLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 60, // 60 req/min for admin endpoints
+  max: 120, // 120 req/min for admin endpoints
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.ip,
