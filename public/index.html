@@ -240,39 +240,40 @@
 
   /* Projects */
   .card-head {
-    padding: 14px 16px; display: flex; align-items: center; justify-content: space-between;
-    border-bottom: 1px solid rgba(0,0,0,0.05);
+    padding: 12px 16px; display: flex; align-items: center; justify-content: space-between;
   }
-  .card-head h2 { font-size: 14px; font-weight: 600; color: rgba(0,0,0,0.5); }
-  .proj-list { padding: 8px 16px; }
+  .card-head h2 { font-size: 13px; font-weight: 600; color: rgba(0,0,0,0.35); text-transform: uppercase; letter-spacing: 0.3px; }
+  .proj-list { display: flex; flex-direction: column; gap: 6px; padding: 0 16px 12px; }
   .proj-item {
-    display: flex; align-items: center; gap: 12px;
-    padding: 12px 0; border-bottom: 1px solid rgba(0,0,0,0.04);
-    min-height: 44px;
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; border-radius: 12px;
+    background: rgba(0,0,0,0.02); border: 1px solid rgba(0,0,0,0.04);
+    min-height: 44px; transition: background 0.15s;
   }
-  .proj-item:last-child { border-bottom: none; }
-  .proj-name { font-size: 15px; font-weight: 600; color: rgba(0,0,0,0.8); }
+  .proj-item:hover { background: rgba(0,0,0,0.04); }
+  .proj-name { font-size: 13px; font-weight: 600; color: rgba(0,0,0,0.75); }
   .proj-key {
-    font-size: 12px; color: rgba(0,0,0,0.3); margin-top: 2px;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px;
-    cursor: pointer;
+    font-size: 11px; color: rgba(0,0,0,0.25); margin-top: 1px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px;
+    cursor: pointer; font-family: inherit;
   }
-  .proj-key:hover { color: rgba(0,0,0,0.5); }
+  .proj-key:hover { color: rgba(0,0,0,0.45); }
   .proj-info { flex: 1; min-width: 0; }
-  .proj-acts { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+  .proj-acts { display: flex; gap: 4px; flex-shrink: 0; }
   .proj-toggle {
-    width: 44px; height: 26px; border-radius: 13px; border: none;
+    width: 36px; height: 22px; border-radius: 11px; border: none;
     cursor: pointer; position: relative; transition: background 0.2s; flex-shrink: 0;
   }
   .proj-toggle.on { background: #34c759; }
   .proj-toggle.off { background: rgba(0,0,0,0.12); }
   .proj-toggle::after {
     content: ''; position: absolute; top: 2px; left: 2px;
-    width: 22px; height: 22px; border-radius: 50%; background: #fff;
+    width: 18px; height: 18px; border-radius: 50%; background: #fff;
     box-shadow: 0 1px 3px rgba(0,0,0,0.15); transition: transform 0.2s;
   }
-  .proj-toggle.on::after { transform: translateX(18px); }
-  .proj-empty { padding: 24px; text-align: center; color: rgba(0,0,0,0.25); font-size: 13px; }
+  .proj-toggle.on::after { transform: translateX(14px); }
+  .proj-empty { padding: 20px; text-align: center; color: rgba(0,0,0,0.2); font-size: 12px; }
+  .proj-date { font-size: 10px; color: rgba(0,0,0,0.18); margin-top: 1px; }
   .proj-date { font-size: 11px; color: rgba(0,0,0,0.2); margin-top: 2px; }
 
   /* Usage Tab */
@@ -295,7 +296,9 @@
     box-shadow: 0 1px 4px rgba(0,0,0,0.03);
   }
   .usage-stat .u-label { font-size: 10px; color: rgba(0,0,0,0.3); text-transform: uppercase; font-weight: 600; letter-spacing: 0.3px; }
-  .usage-stat .u-val { font-size: 20px; font-weight: 700; color: rgba(0,0,0,0.7); margin-top: 3px; }
+  .usage-stat .u-val { font-size: 20px; font-weight: 700; color: rgba(0,0,0,0.7); margin-top: 3px; overflow-x: auto; white-space: nowrap; scrollbar-width: thin; }
+  .usage-stat .u-val::-webkit-scrollbar { height: 2px; }
+  .usage-stat .u-val::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 1px; }
   .usage-stat .u-val.cost { color: #ff9500; }
 
   /* Charts */
@@ -332,8 +335,8 @@
   }
   .usage-proj-arrow.open { transform: rotate(90deg); }
   .usage-proj-name { font-size: 14px; font-weight: 600; color: rgba(0,0,0,0.75); flex: 1; }
-  .usage-proj-summary { display: flex; gap: 14px; font-size: 12px; color: rgba(0,0,0,0.4); flex-shrink: 0; }
-  .usage-proj-summary .cost-val { color: #ff9500; font-weight: 600; font-size: 13px; }
+  .usage-proj-summary { display: flex; gap: 14px; font-size: 12px; color: rgba(0,0,0,0.4); flex-shrink: 0; white-space: nowrap; }
+  .usage-proj-summary .cost-val { color: #ff9500; font-weight: 600; font-size: 13px; white-space: nowrap; }
   .usage-proj-detail { overflow: hidden; transition: max-height 0.25s ease; }
   .usage-proj-detail.collapsed { max-height: 0 !important; }
   .usage-proj-detail table { margin-top: 4px; }
@@ -345,8 +348,9 @@
   }
   .usage-table td { padding: 8px; border-bottom: 1px solid rgba(0,0,0,0.03); color: rgba(0,0,0,0.6); }
   .usage-table tr:last-child td { border-bottom: none; }
-  .usage-table .num { text-align: right; font-variant-numeric: tabular-nums; }
-  .usage-table .cost-cell { color: #ff9500; font-weight: 700; font-size: 14px; }
+  .usage-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .usage-table .cost-cell { color: #ff9500; font-weight: 700; font-size: 14px; white-space: nowrap; }
+  .usage-table { min-width: 500px; }
   .usage-empty { padding: 24px; text-align: center; color: rgba(0,0,0,0.2); font-size: 13px; }
   .usage-detail-wrap {
     overflow-x: auto; -webkit-overflow-scrolling: touch;
