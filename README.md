@@ -229,4 +229,6 @@ curl -X POST https://lumigate.autorums.com/v1/openai/v1/chat/completions \
 
 ## License
 
-MIT
+Copyright © 2026 Richard Wang. All rights reserved.
+
+This software is proprietary and confidential. Unauthorized copying, distribution, modification, or use of this software, via any medium, is strictly prohibited without prior written permission from the author.
