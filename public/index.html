@@ -511,6 +511,7 @@
     <button class="main-tab" data-tab="projects"><span class="tab-icon"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></span> Projects</button>
     <button class="main-tab" data-tab="usage"><span class="tab-icon"><svg viewBox="0 0 24 24"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg></span> Usage</button>
     <button class="main-tab" data-tab="users" id="usersTabBtn" style="display:none"><span class="tab-icon"><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span> Users</button>
+    <button class="main-tab" data-tab="settings" id="settingsTabBtn" style="display:none"><span class="tab-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></span> Settings</button>
   </div>
 
   <!-- Overview Tab -->
@@ -616,6 +617,62 @@
     <div class="glass">
       <div class="card-head"><h2>USER ACCOUNTS</h2><button class="btn pri sm" onclick="openUserModal()">+ User</button></div>
       <div id="userList"><div class="proj-empty">Loading...</div></div>
+    </div>
+  </div>
+
+  <!-- Settings Tab (root only) -->
+  <div class="tab-content" id="tab-settings">
+    <div class="glass">
+      <div class="card-head"><h2>SYSTEM SETTINGS</h2></div>
+
+      <!-- Deploy Mode -->
+      <div style="margin-bottom:20px">
+        <div style="font-size:13px;font-weight:600;color:rgba(0,0,0,0.7);margin-bottom:8px">Deploy Mode</div>
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <button class="btn sm" id="modeBtn-lite" onclick="setMode('lite')">Lite</button>
+          <button class="btn sm" id="modeBtn-enterprise" onclick="setMode('enterprise')">Enterprise</button>
+          <button class="btn sm" id="modeBtn-custom" onclick="setMode('custom')">Custom</button>
+        </div>
+        <div id="settingsModeCurrent" style="font-size:12px;color:rgba(0,0,0,0.4)"></div>
+      </div>
+
+      <!-- Modules (for custom mode) -->
+      <div id="settingsModulesWrap" style="margin-bottom:20px;display:none">
+        <div style="font-size:13px;font-weight:600;color:rgba(0,0,0,0.7);margin-bottom:8px">Modules</div>
+        <div id="settingsModuleList" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+      </div>
+
+      <div style="border-top:1px solid rgba(0,0,0,0.06);margin:16px 0"></div>
+
+      <!-- Auth Mode -->
+      <div style="margin-bottom:20px">
+        <div style="font-size:13px;font-weight:600;color:rgba(0,0,0,0.7);margin-bottom:8px">Admin Authentication</div>
+        <div class="fg">
+          <label>Auth Mode</label>
+          <select id="settingsAuthMode" onchange="toggleAuthRotation()">
+            <option value="static">Static Secret (fixed password)</option>
+            <option value="rotating">Rotating Token (email delivery)</option>
+          </select>
+        </div>
+        <div id="authRotationConfig" style="display:none">
+          <div class="fg"><label>Email Address</label><input type="email" id="settingsAuthEmail" placeholder="admin@example.com"></div>
+          <div class="fg"><label>Rotation Interval (hours)</label><input type="number" id="settingsAuthRotateHours" value="24" min="1" max="720"></div>
+          <div id="settingsAuthLastRotated" style="font-size:11px;color:rgba(0,0,0,0.35);margin-top:4px"></div>
+        </div>
+      </div>
+
+      <div style="border-top:1px solid rgba(0,0,0,0.06);margin:16px 0"></div>
+
+      <!-- System Info -->
+      <div style="margin-bottom:12px">
+        <div style="font-size:13px;font-weight:600;color:rgba(0,0,0,0.7);margin-bottom:8px">System Info</div>
+        <div id="settingsInfo" style="font-size:12px;color:rgba(0,0,0,0.5);line-height:1.8"></div>
+      </div>
+
+      <div style="margin-top:16px">
+        <button class="btn pri" onclick="saveSystemSettings()">Save Settings</button>
+        <span id="settingsRestartHint" style="display:none;font-size:12px;color:#ff9500;margin-left:12px">Restart required for mode changes to take effect.</span>
+      </div>
     </div>
   </div>
 
@@ -809,6 +866,108 @@ function cancelConfirm() {
 }
 
 // ============================================================
+// Settings Tab (root only)
+// ============================================================
+const MODULE_LABELS = {
+  usage: 'Usage Tracking', budget: 'Budget Enforcement', multikey: 'Multi-Key',
+  users: 'User Management', audit: 'Audit Logging', metrics: 'SLI Metrics',
+  backup: 'Backup/Restore', smart: 'Smart Routing', chat: 'Chat UI'
+};
+let _settingsData = {};
+let _selectedMode = '';
+let _selectedModules = new Set();
+
+async function loadSystemSettings() {
+  try {
+    const d = await fetch(B + '/admin/settings').then(r => r.json());
+    _settingsData = d;
+    _selectedMode = d.pendingDeployMode || d.deployMode;
+    _selectedModules = new Set(d.pendingModules || d.modules);
+    renderSettingsMode();
+    renderSettingsModules(d.allModules);
+    // Auth
+    document.getElementById('settingsAuthMode').value = d.authMode || 'static';
+    document.getElementById('settingsAuthEmail').value = d.authEmail || '';
+    document.getElementById('settingsAuthRotateHours').value = d.authRotateHours || 24;
+    toggleAuthRotation();
+    if (d.authLastRotated) {
+      document.getElementById('settingsAuthLastRotated').textContent = 'Last rotated: ' + new Date(d.authLastRotated).toLocaleString();
+    }
+    // Info
+    document.getElementById('settingsInfo').innerHTML =
+      `Current mode: <b>${d.deployMode}</b><br>` +
+      `Active modules: <b>${d.modules.join(', ')}</b><br>` +
+      (d.pendingDeployMode && d.pendingDeployMode !== d.deployMode ? `<span style="color:#ff9500">Pending mode: <b>${d.pendingDeployMode}</b> (restart to apply)</span><br>` : '');
+  } catch (e) { console.error('loadSettings:', e); }
+}
+
+function renderSettingsMode() {
+  ['lite', 'enterprise', 'custom'].forEach(m => {
+    const btn = document.getElementById('modeBtn-' + m);
+    btn.style.background = m === _selectedMode ? 'rgba(0,113,227,0.1)' : '';
+    btn.style.borderColor = m === _selectedMode ? 'rgba(0,113,227,0.4)' : '';
+    btn.style.color = m === _selectedMode ? '#0071e3' : '';
+    btn.style.fontWeight = m === _selectedMode ? '600' : '';
+  });
+  const desc = { lite: 'Lightweight — usage + chat + backup', enterprise: 'All 9 modules enabled', custom: 'Pick individual modules below' };
+  document.getElementById('settingsModeCurrent').textContent = desc[_selectedMode] || '';
+  document.getElementById('settingsModulesWrap').style.display = _selectedMode === 'custom' ? '' : 'none';
+}
+
+function renderSettingsModules(allMods) {
+  const wrap = document.getElementById('settingsModuleList');
+  wrap.innerHTML = (allMods || []).map(m => {
+    const on = _selectedModules.has(m);
+    return `<button class="btn sm" onclick="toggleModule('${m}')" id="modBtn-${m}" style="
+      background:${on ? 'rgba(52,199,89,0.1)' : 'rgba(0,0,0,0.03)'};
+      border-color:${on ? 'rgba(52,199,89,0.4)' : 'rgba(0,0,0,0.08)'};
+      color:${on ? '#34c759' : 'rgba(0,0,0,0.35)'};
+      font-weight:${on ? '600' : '400'}
+    ">${MODULE_LABELS[m] || m}</button>`;
+  }).join('');
+}
+
+function setMode(m) {
+  _selectedMode = m;
+  if (m === 'lite') _selectedModules = new Set(['usage', 'chat', 'backup']);
+  else if (m === 'enterprise') _selectedModules = new Set(_settingsData.allModules || []);
+  renderSettingsMode();
+  renderSettingsModules(_settingsData.allModules);
+}
+
+function toggleModule(m) {
+  if (_selectedModules.has(m)) _selectedModules.delete(m);
+  else _selectedModules.add(m);
+  renderSettingsModules(_settingsData.allModules);
+}
+
+function toggleAuthRotation() {
+  const mode = document.getElementById('settingsAuthMode').value;
+  document.getElementById('authRotationConfig').style.display = mode === 'rotating' ? '' : 'none';
+}
+
+async function saveSystemSettings() {
+  const body = {
+    deployMode: _selectedMode,
+    enabledModules: [..._selectedModules],
+    authMode: document.getElementById('settingsAuthMode').value,
+    authEmail: document.getElementById('settingsAuthEmail').value,
+    authRotateHours: Number(document.getElementById('settingsAuthRotateHours').value) || 24,
+  };
+  try {
+    const d = await fetch(B + '/admin/settings', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(r => r.json());
+    if (d.success) {
+      showT('Settings saved', 'success');
+      document.getElementById('settingsRestartHint').style.display = d.needRestart ? '' : 'none';
+      loadSystemSettings();
+    } else showT(d.error || 'Save failed', 'error');
+  } catch (e) { showT(e.message, 'error'); }
+}
+
+// ============================================================
 // Tab Navigation
 // ============================================================
 document.querySelectorAll('.main-tab').forEach(btn => {
@@ -821,6 +980,7 @@ document.querySelectorAll('.main-tab').forEach(btn => {
     if (tab === 'usage' && adminAuthed) loadUsage();
     if (tab === 'projects' && adminAuthed) loadProjects();
     if (tab === 'users' && adminAuthed && canWrite()) loadUserList();
+    if (tab === 'settings' && adminAuthed && isRoot()) loadSystemSettings();
   });
 });
 
@@ -843,6 +1003,8 @@ function applyRoleUI() {
   const ftm = document.getElementById('freeTierMode');
   if (ftm) ftm.style.display = isRoot() ? '' : 'none';
   if (isRoot()) loadFreeTierMode();
+  // Settings tab: root only
+  document.getElementById('settingsTabBtn').style.display = isRoot() ? '' : 'none';
 }
 
 async function loadFreeTierMode() {

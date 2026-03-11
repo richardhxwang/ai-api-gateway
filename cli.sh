@@ -287,6 +287,30 @@ cmd_config() {
         echo -e "${D}      DEPLOY_MODE, MODULES (writes to .env)${N}"
         exit 1
       fi
+      # Require admin secret for sensitive config changes
+      case "$key" in
+        GATEWAY_URL|GATEWAY_SECRET|PROJECT_DIR) ;; # local config, no auth needed
+        *)
+          if [[ -z "$GATEWAY_SECRET" ]]; then
+            echo -n -e "  ${Y}Admin secret required: ${N}"
+            read -rs _secret; echo ""
+          else
+            _secret="$GATEWAY_SECRET"
+          fi
+          # Verify against running gateway
+          if [[ -n "$GATEWAY_URL" ]]; then
+            _code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 \
+              -X POST "${GATEWAY_URL}/admin/login" \
+              -H "Content-Type: application/json" \
+              -d "{\"secret\":\"${_secret}\"}" 2>/dev/null)
+            if [[ "$_code" != "200" ]]; then
+              fail "Admin secret verification failed"
+              exit 1
+            fi
+            ok "Authenticated"
+          fi
+          ;;
+      esac
       case "$key" in
         GATEWAY_URL|GATEWAY_SECRET|PROJECT_DIR)
           # Update ~/.lumigate

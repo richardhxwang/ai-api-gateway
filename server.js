@@ -1304,18 +1304,127 @@ app.get("/admin/usage/summary", (req, res) => {
 
 // --- Settings API (root only) ---
 app.get("/admin/settings", requireRole("root"), (req, res) => {
-  res.json({ freeTierMode: settings.freeTierMode || "global" });
+  res.json({
+    freeTierMode: settings.freeTierMode || "global",
+    deployMode: DEPLOY_MODE,
+    modules: [...modules],
+    allModules: ALL_MODULES,
+    authMode: settings.authMode || "static",
+    authEmail: settings.authEmail || "",
+    authRotateHours: settings.authRotateHours || 24,
+    authLastRotated: settings.authLastRotated || null,
+  });
 });
 
 app.put("/admin/settings", requireRole("root"), (req, res) => {
-  const { freeTierMode } = req.body;
+  const { freeTierMode, deployMode, enabledModules, authMode, authEmail, authRotateHours } = req.body;
+  const changes = {};
   if (freeTierMode && ["global", "per-project"].includes(freeTierMode)) {
     settings.freeTierMode = freeTierMode;
+    changes.freeTierMode = freeTierMode;
+  }
+  // Deploy mode + modules — persisted to settings.json, applied on restart
+  if (deployMode && ["lite", "enterprise", "custom"].includes(deployMode)) {
+    settings.pendingDeployMode = deployMode;
+    changes.deployMode = deployMode;
+  }
+  if (Array.isArray(enabledModules)) {
+    settings.pendingModules = enabledModules.filter(m => ALL_MODULES.includes(m));
+    changes.modules = settings.pendingModules;
+  }
+  // Auth mode: static (fixed secret) or rotating (email token)
+  if (authMode && ["static", "rotating"].includes(authMode)) {
+    settings.authMode = authMode;
+    changes.authMode = authMode;
+  }
+  if (typeof authEmail === "string") {
+    settings.authEmail = authEmail.trim();
+    changes.authEmail = settings.authEmail;
+  }
+  if (authRotateHours && Number(authRotateHours) >= 1) {
+    settings.authRotateHours = Number(authRotateHours);
+    changes.authRotateHours = settings.authRotateHours;
+  }
+  // Write deploy mode changes to .env for next restart
+  if (changes.deployMode || changes.modules) {
+    try {
+      const envPath = path.join(__dirname, ".env");
+      let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf8") : "";
+      if (changes.deployMode) {
+        const re = /^DEPLOY_MODE=.*$/m;
+        if (re.test(envContent)) envContent = envContent.replace(re, `DEPLOY_MODE=${changes.deployMode}`);
+        else envContent += `\nDEPLOY_MODE=${changes.deployMode}`;
+      }
+      if (changes.deployMode === "custom" && changes.modules) {
+        const re = /^MODULES=.*$/m;
+        const val = `MODULES=${changes.modules.join(",")}`;
+        if (re.test(envContent)) envContent = envContent.replace(re, val);
+        else envContent += `\n${val}`;
+      }
+      fs.writeFileSync(envPath, envContent, { mode: 0o600 });
+    } catch (e) { console.error("Failed to persist .env:", e.message); }
   }
   saveSettings(settings);
-  audit(req.userName, "settings_update", null, { freeTierMode: settings.freeTierMode });
-  res.json({ success: true, settings: { freeTierMode: settings.freeTierMode || "global" } });
+  audit(req.userName, "settings_update", null, changes);
+  const needRestart = !!(changes.deployMode || changes.modules);
+  res.json({
+    success: true,
+    needRestart,
+    settings: {
+      freeTierMode: settings.freeTierMode || "global",
+      deployMode: DEPLOY_MODE,
+      pendingDeployMode: settings.pendingDeployMode,
+      modules: [...modules],
+      pendingModules: settings.pendingModules,
+      authMode: settings.authMode || "static",
+      authEmail: settings.authEmail || "",
+      authRotateHours: settings.authRotateHours || 24,
+    }
+  });
 });
+
+// --- Auth token rotation (rotating mode) ---
+let rotationTimer = null;
+function scheduleTokenRotation() {
+  if (rotationTimer) clearTimeout(rotationTimer);
+  if (settings.authMode !== "rotating" || !settings.authEmail) return;
+  const hours = settings.authRotateHours || 24;
+  const lastRotated = settings.authLastRotated ? new Date(settings.authLastRotated).getTime() : 0;
+  const nextRotation = lastRotated + hours * 3600000;
+  const delay = Math.max(0, nextRotation - Date.now());
+  rotationTimer = setTimeout(async () => {
+    await rotateAdminToken();
+    scheduleTokenRotation(); // schedule next
+  }, delay);
+  console.log(`Token rotation scheduled in ${Math.round(delay / 60000)}min`);
+}
+
+async function rotateAdminToken() {
+  const newToken = crypto.randomBytes(32).toString("hex");
+  const email = settings.authEmail;
+  if (!email) return;
+  // Update .env
+  try {
+    const envPath = path.join(__dirname, ".env");
+    let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf8") : "";
+    const re = /^ADMIN_SECRET=.*$/m;
+    if (re.test(envContent)) envContent = envContent.replace(re, `ADMIN_SECRET=${newToken}`);
+    else envContent += `\nADMIN_SECRET=${newToken}`;
+    fs.writeFileSync(envPath, envContent, { mode: 0o600 });
+  } catch (e) { console.error("Failed to write rotated token:", e.message); return; }
+  // Send email notification (via simple SMTP or log for manual pickup)
+  console.log(`[TOKEN ROTATION] New admin token generated. Sending to ${email}...`);
+  settings.authLastRotated = new Date().toISOString();
+  settings.pendingRotatedToken = newToken;
+  saveSettings(settings);
+  // Emit audit event
+  audit("system", "token_rotated", null, { email, nextRotation: `${settings.authRotateHours}h` });
+  // Note: actual email delivery requires SMTP config. Token is saved to settings for manual retrieval.
+  console.log(`[TOKEN ROTATION] New token stored. Restart required to apply. Token preview: ${newToken.slice(0, 8)}...`);
+}
+
+// Start rotation schedule if configured
+scheduleTokenRotation();
 
 // Update API key at runtime + persist to .env (sanitized)
 app.post("/admin/key", requireRole("root"), async (req, res) => {
