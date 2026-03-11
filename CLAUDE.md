@@ -1,51 +1,43 @@
-# AI API Gateway — Development Guide
+# LumiGate — Project-Focused Dev Guide
 
-## Project
-Self-hosted multi-provider AI API gateway. Express.js + Nginx + Docker.
-Target: Personal/SME, AI-driven apps, ~10k DAU, runs on NAS/mini PC.
+## What this repo is
+Self-hosted multi-provider AI gateway (Express + Nginx + Docker), optimized for SME and low-memory hosts.
 
-## Build & Run
+## Run (most common)
 ```bash
-docker compose up -d --build          # Full stack (nginx + app + cloudflare)
-docker compose up -d --build ai-api-proxy  # Rebuild app only
-node server.js                        # Direct run (dev)
+docker compose up -d --build              # prod stack
+docker compose -f reviews/docker-compose.test.yml -p ai-api-proxy-test up -d --build  # isolated test stack
+node server.js                            # direct dev run
 ```
 
-## Test
+## Verify quickly
 ```bash
-node -c server.js                     # Syntax check
-curl http://localhost:9471/health      # Health check
-ab -n 1000 -c 100 http://localhost:9471/health  # Stress test
+node -c server.js
+curl http://localhost:9471/health
 ```
 
-## Architecture
-- **server.js** — Single monolith: proxy, auth, usage tracking, admin API, cost engine
-- **nginx/nginx.conf** — Reverse proxy with cache, failover, maintenance pages, security headers
-- **public/index.html** — Dashboard SPA (Canvas charts, SF Pro fonts, Apple HIG style)
-- **public/chat.html** — Chat interface (SSE streaming, admin-session gated)
-- **data/** — JSON persistence (projects, usage, exchange rates). Docker volume mounted.
+## Files that matter first
+- `server.js`: auth, modules, proxy, usage, backup/audit/metrics APIs
+- `nginx/nginx.conf`: reverse proxy, health fallback, security headers
+- `public/index.html`: dashboard + admin flows
+- `docker-compose.yml`: prod deployment
+- `reviews/docker-compose.test.yml`: isolated test/chaos environment
 
-## Key Patterns
-- **Auth**: Session tokens in Map, 24h expiry. Cookie (HttpOnly+Secure+SameSite). CLI/TUI can use raw ADMIN_SECRET directly.
-- **Proxy**: Single pre-created middleware with dynamic `router`. Auth headers injected in onProxyReq. Usage parsed from SSE tail buffer (8KB).
-- **Data writes**: Always atomic (tmp file + rename). ensureDataDir() runs once.
-- **Rate limiting**: normalizeIP() handles IPv6-mapped IPv4. Nginx sets X-Forwarded-For to $remote_addr.
-- **Security**: See PROVIDER_HOST_ALLOWLIST, ALLOWED_UPSTREAM_PATHS, isPrivateIP(), safeEqual() in server.js.
+## Project rules (high signal)
+- Keep port `9471` as default.
+- Keep `/providers` response fields `baseUrl` + `available` (UI relies on both).
+- Keep all data writes atomic (`*.tmp` + rename), never write partial JSON directly.
+- Never log secrets (`ADMIN_SECRET`, API keys, tunnel tokens).
+- Use `safeEqual()` for secret comparison; do not replace with plain equality.
+- Keep 10MB body limit unless there is a scoped and tested reason to change it.
 
-## Provider Order
-openai, anthropic, gemini, deepseek, kimi, doubao, qwen, minimax
+## Mode policy
+- `lite`: keep data-plane security/perf behavior; trim management modules only.
+- `enterprise`: enable governance modules (`audit`, `metrics`, `backup`, etc.).
+- Any mode change must be root-controlled and clearly visible in UI/health output.
 
-## Conventions
-- Port: 9471 everywhere
-- Fonts: SF Pro Display/Text (CSS), SF Pro Display (Canvas ctx.font — use double quotes for outer string)
-- Currency: 10 currencies, fmtCost() with max 5 decimal places (no scientific notation)
-- Body limit: 10MB (express.json + nginx client_max_body_size)
-- Projects page: key hidden, click to reveal + auto-copy, 5s timeout
-- Error responses: never include stack traces or internal details
-- Provider responses: include baseUrl + available, never include apiKey
-
-## Don't
-- Don't use `replace_all` on strings that appear in both HTML/CSS and JavaScript (quote conflicts)
-- Don't remove baseUrl from /providers response (dashboard frontend needs it)
-- Don't log secrets to console
-- Don't use `===` for auth comparisons (use safeEqual)
+## Before merging changes
+1. Syntax check passes.
+2. Health endpoint responds.
+3. Auth/limit behavior unchanged unless intentionally modified.
+4. If touching proxy paths, verify `/v1/{provider}/...` compatibility.
