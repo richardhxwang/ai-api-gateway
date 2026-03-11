@@ -1,6 +1,6 @@
 # Enterprise Gateway Code Review Report (v2)
 
-Project: `ai-api-proxy`
+Project: `LumiGate`
 Date: 2026-03-10
 Positioning Target: Enterprise-grade gateway for AI-driven SME products, deployable on NAS / mini PC with low memory footprint.
 
@@ -95,11 +95,11 @@ These v1 findings are considered covered by current patch and removed from activ
 
 ---
 
-## Competitive Analysis: ai-api-proxy vs. LiteLLM vs. One-API
+## Competitive Analysis: LumiGate vs. LiteLLM vs. One-API
 
 ### Overview
 
-| Dimension | ai-api-proxy | LiteLLM (BerriAI) | One-API / New-API |
+| Dimension | LumiGate | LiteLLM (BerriAI) | One-API / New-API |
 |-----------|-------------|-------------------|-------------------|
 | **Language** | Node.js (Express) | Python (FastAPI) | Go + React |
 | **Providers** | 8 | 140+ | 30+ |
@@ -113,7 +113,7 @@ These v1 findings are considered covered by current patch and removed from activ
 
 ### Feature Comparison
 
-| Feature | ai-api-proxy | LiteLLM | One-API |
+| Feature | LumiGate | LiteLLM | One-API |
 |---------|-------------|---------|---------|
 | OpenAI-compatible API | ✅ | ✅ | ✅ |
 | Anthropic native format | ✅ (passthrough) | ✅ | ✅ (New-API) |
@@ -137,7 +137,7 @@ These v1 findings are considered covered by current patch and removed from activ
 | **CLI/TUI management** | ✅ | ❌ | ❌ |
 | **Redemption codes** | ❌ | ❌ | ✅ (API reselling) |
 
-### Where ai-api-proxy Wins
+### Where LumiGate Wins
 
 1. **Deployment simplicity** — Single Node.js process, zero external dependencies (no PG, no Redis, no MySQL). Ideal for NAS / mini PC / homelab. LiteLLM needs PostgreSQL + optionally Redis; One-API needs at least SQLite, MySQL for production.
 
@@ -151,9 +151,9 @@ These v1 findings are considered covered by current patch and removed from activ
 
 6. **Graceful shutdown** — Connection draining with configurable timeout. Not present in LiteLLM or One-API.
 
-### Where ai-api-proxy Falls Short
+### Where LumiGate Falls Short
 
-1. **No per-project budget/quota enforcement** — Both LiteLLM and One-API can cap spend per key/user. ai-api-proxy tracks usage but cannot block requests when a budget is exceeded. This is the single biggest enterprise gap.
+1. **No per-project budget/quota enforcement** — Both LiteLLM and One-API can cap spend per key/user. LumiGate tracks usage but cannot block requests when a budget is exceeded. This is the single biggest enterprise gap.
 
 2. **No per-project model restrictions** — Cannot restrict which models a project key can access. LiteLLM and One-API both support this.
 
@@ -230,13 +230,13 @@ These v1 findings are considered covered by current patch and removed from activ
 
 LiteLLM is the feature-richest open-source gateway but carries significant operational burden: Python runtime, mandatory PostgreSQL, recommended Redis, reported memory leaks, and key enterprise features (SSO, full RBAC, audit logs) gated behind $250/month or $30k/year enterprise license.
 
-**ai-api-proxy's angle**: Zero-dependency, edge-deployable, with enterprise security built-in rather than bolted-on. Target users who need a gateway that "just runs" on a NAS/mini-PC without a DevOps team, while still having real cost tracking and project isolation.
+**LumiGate's angle**: Zero-dependency, edge-deployable, with enterprise security built-in rather than bolted-on. Target users who need a gateway that "just runs" on a NAS/mini-PC without a DevOps team, while still having real cost tracking and project isolation.
 
 ### vs. One-API / New-API
 
 One-API excels at turnkey deployment (single Go binary) and has a mature multi-tenant billing system with redemption codes — ideal for API reselling. However, its cost tracking uses approximate multipliers rather than real token pricing, rate limiting is basic, and the original repo's development has slowed (New-API fork is more active but switched to AGPLv3).
 
-**ai-api-proxy's angle**: More accurate cost tracking (real token-level pricing vs. multipliers), better operational tooling (CLI/TUI/chat UI), and actively maintained under your direct control. The gap to close is budget enforcement and multi-channel routing, both achievable in Phase 1-2.
+**LumiGate's angle**: More accurate cost tracking (real token-level pricing vs. multipliers), better operational tooling (CLI/TUI/chat UI), and actively maintained under your direct control. The gap to close is budget enforcement and multi-channel routing, both achievable in Phase 1-2.
 
 ### Differentiation Summary
 

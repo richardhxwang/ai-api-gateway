@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>AI Gateway</title>
+<title>LumiGate</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -298,14 +298,34 @@
   .fg-row { display: flex; gap: 10px; }
   .fg-row .fg { flex: 1; }
   .fg-hint { font-size: 10px; color: rgba(0,0,0,0.25); margin-top: 2px; }
-  .model-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  .model-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; max-height: 120px; overflow-y: auto; }
   .model-chip {
     font-size: 10px; padding: 2px 8px; border-radius: 6px;
-    background: rgba(0,0,0,0.04); border: 1px solid rgba(0,0,0,0.08);
+    background: rgba(0,113,227,0.1); border: 1px solid rgba(0,113,227,0.3); color: #0071e3;
     cursor: pointer; transition: all 0.15s; user-select: none;
   }
-  .model-chip.sel { background: rgba(0,113,227,0.1); border-color: rgba(0,113,227,0.3); color: #0071e3; }
-  .model-chip:hover { background: rgba(0,0,0,0.06); }
+  .model-chip:hover { background: rgba(255,59,48,0.1); border-color: rgba(255,59,48,0.3); color: #ff3b30; }
+  .modal-tabs { display: flex; gap: 0; margin: -4px 0 14px; border-bottom: 1px solid rgba(0,0,0,0.06); }
+  .modal-tab {
+    font-size: 12px; font-weight: 500; padding: 6px 14px; cursor: pointer;
+    color: rgba(0,0,0,0.35); border-bottom: 2px solid transparent; transition: all 0.15s;
+  }
+  .modal-tab.active { color: #0071e3; border-bottom-color: #0071e3; }
+  .modal-tab-pane { display: none; }
+  .modal-tab-pane.active { display: block; }
+
+  .keys-float-panel {
+    display: none; position: absolute; top: 100%; left: 0; right: 0; z-index: 20;
+    background: rgba(255,255,255,0.96); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(0,0,0,0.08); border-radius: 10px; box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+    padding: 6px; max-height: 260px; overflow-y: auto;
+  }
+  .keys-float-panel.open { display: block; }
+  .key-row { transition: background 0.15s; }
+  .key-row:hover { background: rgba(0,0,0,0.03); }
+  .key-row.drag-over { background: rgba(0,122,255,0.06); border-radius: 8px; }
+  .keys-float-panel::-webkit-scrollbar { width: 4px; }
+  .keys-float-panel::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.12); border-radius: 2px; }
 
   /* Usage Tab */
   .usage-controls {
@@ -466,13 +486,19 @@
     .usage-stat { padding: 10px; }
     .usage-stat .u-val { font-size: 17px; }
   }
+  .switch { position: relative; display: inline-block; width: 36px; height: 20px; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch .slider { position: absolute; cursor: pointer; inset: 0; background: #ccc; border-radius: 20px; transition: .2s; }
+  .switch .slider:before { content: ""; position: absolute; height: 16px; width: 16px; left: 2px; bottom: 2px; background: #fff; border-radius: 50%; transition: .2s; }
+  .switch input:checked + .slider { background: #34c759; }
+  .switch input:checked + .slider:before { transform: translateX(16px); }
 </style>
 </head>
 <body>
 <div class="container">
 
   <div class="header">
-    <h1>AI Gateway</h1>
+    <h1>LumiGate</h1>
     <span class="header-badge on" id="hBadge">Online</span>
     <span class="header-uptime" id="hUptime"></span>
     <div class="header-spacer"></div>
@@ -484,6 +510,7 @@
     <button class="main-tab" data-tab="providers"><span class="tab-icon"><svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></span> Providers</button>
     <button class="main-tab" data-tab="projects"><span class="tab-icon"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></span> Projects</button>
     <button class="main-tab" data-tab="usage"><span class="tab-icon"><svg viewBox="0 0 24 24"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg></span> Usage</button>
+    <button class="main-tab" data-tab="users" id="usersTabBtn" style="display:none"><span class="tab-icon"><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span> Users</button>
   </div>
 
   <!-- Overview Tab -->
@@ -517,7 +544,7 @@
     <div class="glass">
       <div class="card-head">
         <h2>Project Keys</h2>
-        <button class="btn sm pri" onclick="openProjM()">+ Project</button>
+        <button class="btn sm pri" onclick="openProjM()" id="addProjBtn">+ Project</button>
       </div>
       <div class="proj-list" id="projList">
         <div class="proj-empty">Loading...</div>
@@ -537,6 +564,10 @@
         <option value="30">30 days</option>
       </select>
       <div class="spacer"></div>
+      <select id="freeTierMode" onchange="saveFreeTierMode()" style="display:none">
+        <option value="global">Free Tier: Global Pool</option>
+        <option value="per-project">Free Tier: Per Project</option>
+      </select>
       <select id="usageCurrency" onchange="renderUsage()">
         <option value="USD">$ USD</option>
         <option value="CNY">&yen; CNY</option>
@@ -580,6 +611,14 @@
     </div>
   </div>
 
+  <!-- Users Tab -->
+  <div class="tab-content" id="tab-users">
+    <div class="glass">
+      <div class="card-head"><h2>USER ACCOUNTS</h2><button class="btn pri sm" onclick="openUserModal()">+ User</button></div>
+      <div id="userList"><div class="proj-empty">Loading...</div></div>
+    </div>
+  </div>
+
 </div>
 
 <!-- Modals -->
@@ -600,7 +639,14 @@
       <div class="fg"><label>Budget Limit (USD)</label><input type="number" id="projBudget" placeholder="No limit" min="0" step="0.01"></div>
       <div class="fg"><label>Reset Period</label><select id="projPeriod"><option value="">Lifetime</option><option value="monthly">Monthly</option><option value="daily">Daily</option></select></div>
     </div>
-    <div class="fg"><label>Allowed Models</label><div class="fg-hint">Leave empty = all models. Click to toggle.</div><div class="model-chips" id="projModelChips"></div></div>
+    <div class="fg"><label>Allowed Models</label><div class="fg-hint">Leave empty = all models allowed.</div>
+      <div style="display:flex;gap:6px;margin-bottom:6px">
+        <select id="projModelProv" onchange="updateModelDropdown('projModelSel','projModelProv')" style="flex:1"></select>
+        <select id="projModelSel" style="flex:1"></select>
+        <button class="btn sm" onclick="addModelToList('proj')">+ Add</button>
+      </div>
+      <div class="model-chips" id="projModelChips"></div>
+    </div>
     <div class="modal-foot"><button class="btn" onclick="closeProjM()">Cancel</button><button class="btn pri" onclick="addProj()">Create</button></div>
   </div>
 </div>
@@ -608,25 +654,105 @@
   <div class="modal">
     <h3 id="editProjTitle">Edit Project</h3>
     <input type="hidden" id="editProjOrigName">
-    <div class="fg"><label>Project Name</label><input type="text" id="editProjName"></div>
-    <div class="fg-row">
-      <div class="fg"><label>Budget Limit (USD)</label><input type="number" id="editProjBudget" placeholder="No limit" min="0" step="0.01"></div>
-      <div class="fg"><label>Reset Period</label><select id="editProjPeriod"><option value="">Lifetime</option><option value="monthly">Monthly</option><option value="daily">Daily</option></select></div>
+    <div class="modal-tabs">
+      <div class="modal-tab active" onclick="switchEditTab(0)">Basic</div>
+      <div class="modal-tab" onclick="switchEditTab(1)">Models</div>
+      <div class="modal-tab" onclick="switchEditTab(2)">Routing</div>
     </div>
-    <div class="fg" style="display:flex;align-items:center;gap:8px">
-      <label style="margin:0;flex-shrink:0">Spent</label>
-      <span id="editProjSpent" style="font-size:12px;color:rgba(0,0,0,0.5)">$0.00</span>
-      <button class="btn sm" onclick="resetEditBudget()" style="font-size:10px;padding:2px 8px;min-height:24px">Reset</button>
+    <div class="modal-tab-pane active" id="editTab0">
+      <div class="fg"><label>Project Name</label><input type="text" id="editProjName"></div>
+      <div class="fg-row">
+        <div class="fg"><label>Budget Limit (USD)</label><input type="number" id="editProjBudget" placeholder="No limit" min="0" step="0.01"></div>
+        <div class="fg"><label>Reset Period</label><select id="editProjPeriod"><option value="">Lifetime</option><option value="monthly">Monthly</option><option value="daily">Daily</option></select></div>
+      </div>
+      <div class="fg" style="display:flex;align-items:center;gap:8px">
+        <label style="margin:0;flex-shrink:0">Spent</label>
+        <span id="editProjSpent" style="font-size:12px;color:rgba(0,0,0,0.5)">$0.00</span>
+        <button class="btn sm" onclick="resetEditBudget()" style="font-size:10px;padding:2px 8px;min-height:24px">Reset</button>
+      </div>
     </div>
-    <div class="fg"><label>Allowed Models</label><div class="fg-hint">Leave empty = all models. Click to toggle.</div><div class="model-chips" id="editModelChips"></div></div>
+    <div class="modal-tab-pane" id="editTab1">
+      <div class="fg"><label>Allowed Models</label><div class="fg-hint">Leave empty = all models allowed.</div>
+        <div style="display:flex;gap:6px;margin-bottom:6px">
+          <select id="editModelProv" onchange="updateModelDropdown('editModelSel','editModelProv')" style="flex:1"></select>
+          <select id="editModelSel" style="flex:1"></select>
+          <button class="btn sm" onclick="addModelToList('edit')">+ Add</button>
+        </div>
+        <div class="model-chips" id="editModelChips"></div>
+      </div>
+    </div>
+    <div class="modal-tab-pane" id="editTab2">
+      <div class="fg" style="display:flex;align-items:center;gap:10px">
+        <label style="margin:0;font-weight:600">Enable</label>
+        <label class="switch"><input type="checkbox" id="editSmartEnabled" onchange="toggleSmartUI()"><span class="slider"></span></label>
+      </div>
+      <div id="smartRoutingUI" style="display:none">
+        <div class="fg-row" style="margin-top:8px">
+          <div class="fg"><label>Classifier Provider</label><select id="editSmartClassProv" onchange="updateClassifierModels()"></select></div>
+          <div class="fg"><label>Classifier Model</label><select id="editSmartClassModel"></select></div>
+        </div>
+        <div class="fg"><label>Fallback Provider / Model</label>
+          <div class="fg-row">
+            <select id="editSmartFallbackProv" onchange="updateFallbackModels()"></select>
+            <select id="editSmartFallbackModel"></select>
+          </div>
+        </div>
+        <div class="fg"><label>Candidate Models</label><div class="fg-hint">Add models the router can choose from.</div>
+          <div style="display:flex;gap:6px;margin-bottom:8px">
+            <select id="smartCandProv" onchange="updateSmartCandModels()" style="flex:1"></select>
+            <select id="smartCandModel" style="flex:1"></select>
+            <button class="btn sm" onclick="addSmartCandidate()">+ Add</button>
+          </div>
+          <div id="editSmartCandidates" style="display:flex;flex-wrap:wrap;gap:4px"></div>
+        </div>
+      </div>
+    </div>
     <div class="modal-foot"><button class="btn" onclick="closeEditProj()">Cancel</button><button class="btn pri" onclick="saveEditProj()">Save</button></div>
   </div>
 </div>
 <div class="overlay" id="loginOverlay">
   <div class="modal">
-    <h3>Admin Login</h3>
-    <div class="fg"><label>Admin Secret</label><input type="password" id="loginSecret" placeholder="Enter ADMIN_SECRET"></div>
+    <h3>Login</h3>
+    <div class="login-tabs" style="display:flex;gap:0;margin-bottom:12px;border-radius:8px;overflow:hidden;border:1px solid rgba(0,0,0,0.08)">
+      <button class="login-tab active" onclick="switchLoginTab('secret')" id="ltSecret" style="flex:1;padding:8px;font-size:12px;font-weight:600;border:none;cursor:pointer;background:rgba(0,113,227,0.08);color:#0071e3">Admin Secret</button>
+      <button class="login-tab" onclick="switchLoginTab('user')" id="ltUser" style="flex:1;padding:8px;font-size:12px;font-weight:600;border:none;cursor:pointer;background:transparent;color:rgba(0,0,0,0.4)">Username</button>
+    </div>
+    <div id="loginSecretPane">
+      <div class="fg"><label>Admin Secret</label><input type="password" id="loginSecret" placeholder="Enter ADMIN_SECRET"></div>
+    </div>
+    <div id="loginUserPane" style="display:none">
+      <div class="fg"><label>Username</label><input type="text" id="loginUsername" placeholder="Username" autocomplete="username"></div>
+      <div class="fg"><label>Password</label><input type="password" id="loginPassword" placeholder="Password" autocomplete="current-password"></div>
+    </div>
     <div class="modal-foot"><button class="btn pri" onclick="doLogin()">Login</button></div>
+  </div>
+</div>
+<div class="overlay" id="userOverlay">
+  <div class="modal">
+    <h3 id="userModalTitle">Add User</h3>
+    <input type="hidden" id="userEditName">
+    <div class="fg"><label>Username</label><input type="text" id="userUsername" placeholder="alphanumeric + underscore" autocomplete="off"></div>
+    <div class="fg"><label>Password</label><input type="password" id="userPassword" placeholder="Min 8 characters" autocomplete="new-password"></div>
+    <div class="fg"><label>Role</label><select id="userRole"><option value="admin">Admin</option><option value="user">User</option></select></div>
+    <div class="fg" id="userProjectsWrap"><label>Linked Projects</label><div class="fg-hint">Select projects this user can access (User role only)</div><div class="model-chips" id="userProjectChips"></div></div>
+    <div class="modal-foot"><button class="btn" onclick="closeUserModal()">Cancel</button><button class="btn pri" onclick="saveUser()">Save</button></div>
+  </div>
+</div>
+<div class="overlay" id="confirmOverlay">
+  <div class="modal" style="max-width:380px">
+    <h3 id="confirmTitle" style="color:#ff3b30">Confirm Action</h3>
+    <p id="confirmMsg" style="margin:0 0 16px;font-size:13px;color:rgba(0,0,0,0.6)"></p>
+    <div class="fg"><label>Enter Admin Secret to confirm</label><input type="password" id="confirmSecret" placeholder="Admin Secret" autocomplete="off"></div>
+    <div class="modal-foot"><button class="btn" onclick="cancelConfirm()">Cancel</button><button class="btn" style="background:#ff3b30;color:#fff" onclick="execConfirm()">Confirm</button></div>
+  </div>
+</div>
+<div class="overlay" id="addKeyOverlay">
+  <div class="modal" style="max-width:400px">
+    <h3>Add API Key — <span id="addKeyProvider"></span></h3>
+    <div class="fg"><label>Label</label><input type="text" id="addKeyLabel" placeholder="e.g. Main, Backup, Team-A" maxlength="32" autocomplete="off"></div>
+    <div class="fg"><label>API Key</label><input type="password" id="addKeyValue" placeholder="sk-..." autocomplete="off"></div>
+    <div class="fg"><label>Assign to Project</label><select id="addKeyProject"><option value="">Public (all projects)</option></select><div class="fg-hint">Public keys are used as fallback for all projects</div></div>
+    <div class="modal-foot"><button class="btn" onclick="closeAddKey()">Cancel</button><button class="btn pri" onclick="saveNewKey()">Save & Test</button></div>
   </div>
 </div>
 <div class="toast" id="toast"></div>
@@ -638,6 +764,8 @@ let providers = [];
 let activeProv = '';
 let selectedModel = '';
 let adminAuthed = false;
+let userRole = '';
+let userProjects = [];
 let cachedUsageSummary = null;
 let cachedUsageDetail = null;
 let projectsList = [];
@@ -646,6 +774,38 @@ function esc(s) {
   const d = document.createElement('div');
   d.textContent = s;
   return d.innerHTML;
+}
+
+// ============================================================
+// Dangerous Action Confirmation (re-enter admin secret)
+// ============================================================
+let _confirmResolve = null;
+function confirmDangerous(title, msg) {
+  return new Promise(resolve => {
+    _confirmResolve = resolve;
+    document.getElementById('confirmTitle').textContent = title;
+    document.getElementById('confirmMsg').textContent = msg;
+    document.getElementById('confirmSecret').value = '';
+    document.getElementById('confirmOverlay').classList.add('show');
+    setTimeout(() => document.getElementById('confirmSecret').focus(), 100);
+  });
+}
+async function execConfirm() {
+  const secret = document.getElementById('confirmSecret').value;
+  if (!secret) return;
+  try {
+    const r = await fetch(B + '/admin/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ secret })
+    });
+    if (!r.ok) { showT('Secret incorrect', 'error'); return; }
+  } catch { showT('Verification failed', 'error'); return; }
+  document.getElementById('confirmOverlay').classList.remove('show');
+  if (_confirmResolve) { _confirmResolve(true); _confirmResolve = null; }
+}
+function cancelConfirm() {
+  document.getElementById('confirmOverlay').classList.remove('show');
+  if (_confirmResolve) { _confirmResolve(false); _confirmResolve = null; }
 }
 
 // ============================================================
@@ -660,40 +820,103 @@ document.querySelectorAll('.main-tab').forEach(btn => {
     document.getElementById('tab-' + tab).classList.add('active');
     if (tab === 'usage' && adminAuthed) loadUsage();
     if (tab === 'projects' && adminAuthed) loadProjects();
+    if (tab === 'users' && adminAuthed && canWrite()) loadUserList();
   });
 });
 
 // ============================================================
 // Admin Auth
 // ============================================================
+function canWrite() { return userRole === 'root' || userRole === 'admin'; }
+function isRoot() { return userRole === 'root'; }
+
+function applyRoleUI() {
+  // Users tab: root and admin only
+  document.getElementById('usersTabBtn').style.display = canWrite() ? '' : 'none';
+  // Chat link: root and admin only
+  const chatLink = document.querySelector('.header-chat');
+  if (chatLink) chatLink.style.display = canWrite() ? '' : 'none';
+  // Add project button: root and admin only
+  const addBtn = document.getElementById('addProjBtn');
+  if (addBtn) addBtn.style.display = canWrite() ? '' : 'none';
+  // Free-tier mode toggle: root only
+  const ftm = document.getElementById('freeTierMode');
+  if (ftm) ftm.style.display = isRoot() ? '' : 'none';
+  if (isRoot()) loadFreeTierMode();
+}
+
+async function loadFreeTierMode() {
+  try {
+    const d = await fetch(B + '/admin/settings').then(r => r.json());
+    document.getElementById('freeTierMode').value = d.freeTierMode || 'global';
+  } catch {}
+}
+
+async function saveFreeTierMode() {
+  const mode = document.getElementById('freeTierMode').value;
+  await fetch(B + '/admin/settings', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ freeTierMode: mode })
+  });
+  loadUsage();
+}
+
 async function checkAuth() {
   try {
     const d = await fetch(B + '/admin/auth').then(r => r.json());
     adminAuthed = d.authenticated;
+    userRole = d.role || '';
+    userProjects = d.projects || [];
     if (!adminAuthed) document.getElementById('loginOverlay').classList.add('show');
+    else applyRoleUI();
     return adminAuthed;
   } catch { return false; }
 }
 
+function switchLoginTab(tab) {
+  document.getElementById('loginSecretPane').style.display = tab === 'secret' ? '' : 'none';
+  document.getElementById('loginUserPane').style.display = tab === 'user' ? '' : 'none';
+  const s = document.getElementById('ltSecret'), u = document.getElementById('ltUser');
+  if (tab === 'secret') { s.style.background = 'rgba(0,113,227,0.08)'; s.style.color = '#0071e3'; u.style.background = 'transparent'; u.style.color = 'rgba(0,0,0,0.4)'; }
+  else { u.style.background = 'rgba(0,113,227,0.08)'; u.style.color = '#0071e3'; s.style.background = 'transparent'; s.style.color = 'rgba(0,0,0,0.4)'; }
+}
+
 async function doLogin() {
-  const secret = document.getElementById('loginSecret').value;
-  if (!secret) return;
+  let body;
+  const secretPane = document.getElementById('loginSecretPane');
+  if (secretPane.style.display !== 'none') {
+    const secret = document.getElementById('loginSecret').value;
+    if (!secret) return;
+    body = { secret };
+  } else {
+    const username = document.getElementById('loginUsername').value;
+    const password = document.getElementById('loginPassword').value;
+    if (!username || !password) return;
+    body = { username, password };
+  }
   try {
     const r = await fetch(B + '/admin/login', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ secret })
+      body: JSON.stringify(body)
     });
-    if (r.ok) {
+    const d = await r.json();
+    if (r.ok && d.success) {
       document.getElementById('loginOverlay').classList.remove('show');
       adminAuthed = true;
+      userRole = d.role;
+      applyRoleUI();
       load(); loadProjects(); loadUsage();
+      if (canWrite()) loadUserList();
     } else {
-      showT('Invalid admin secret', 'error');
+      showT(d.error || 'Login failed', 'error');
     }
   } catch (e) { showT(e.message, 'error'); }
 }
 
 document.getElementById('loginSecret').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doLogin();
+});
+document.getElementById('loginPassword').addEventListener('keydown', e => {
   if (e.key === 'Enter') doLogin();
 });
 
@@ -817,19 +1040,6 @@ async function switchProv(name) {
 
   const panel = document.getElementById('provPanel');
 
-  if (!prov.available) {
-    panel.innerHTML = `
-      <div class="prov-info-bar">
-        <span class="prov-url">${esc(prov.baseUrl)}</span>
-        <span class="tag off">No Key</span>
-        <button class="btn sm" onclick="openM('${esc(name)}')">Add Key</button>
-      </div>
-      <div style="padding:20px;text-align:center;color:rgba(0,0,0,0.25);font-size:13px">
-        Configure API key to enable this provider
-      </div>`;
-    return;
-  }
-
   const models = await loadModels(name);
   selectedModel = models.length ? models[0].id : '';
 
@@ -841,13 +1051,33 @@ async function switchProv(name) {
   };
   const capLabel = { image: 'Img', audio: 'Aud', video: 'Vid', pdf: 'PDF' };
 
+  // Keys section (root only) — collapsible, floats over content
+  let keysHtml = '';
+  if (isRoot()) {
+    const kc = prov.keyCount || 0;
+    const ec = prov.enabledCount || 0;
+    keysHtml = `
+      <div class="keys-dropdown" style="position:relative;border-bottom:1px solid rgba(0,0,0,0.06);padding:6px 0">
+        <div style="display:flex;align-items:center;gap:6px;cursor:pointer" onclick="toggleKeysDropdown()">
+          <span class="keys-arrow" id="keysArrow" style="font-size:10px;color:rgba(0,0,0,0.3);transition:transform 0.2s">&#9654;</span>
+          <span style="font-size:12px;font-weight:600;color:rgba(0,0,0,0.5)">API Keys</span>
+          <span style="font-size:11px;color:rgba(0,0,0,0.3)">${ec}/${kc} active</span>
+          <span style="flex:1"></span>
+          <button class="btn sm" onclick="event.stopPropagation();openAddKey('${esc(name)}')">+ Add</button>
+        </div>
+        <div id="keysPanel" class="keys-float-panel">
+          <div id="keysList"></div>
+        </div>
+      </div>`;
+  }
+
   panel.innerHTML = `
     <div class="prov-info-bar">
       <span class="prov-url">${esc(prov.baseUrl)}</span>
-      <span class="tag on">Active</span>
-      <button class="btn sm" onclick="openM('${esc(name)}')">Edit</button>
+      <span class="tag ${prov.available ? 'on' : 'off'}">${prov.available ? 'Active' : 'No Key'}</span>
     </div>
-    <div class="model-list">
+    ${keysHtml}
+    ${models.length ? `<div class="model-list">
       ${models.map((m, i) => `
         <div class="model-item${i === 0 ? ' selected' : ''}" data-id="${esc(m.id)}" onclick="selectModel('${esc(m.id)}')">
           <div class="model-main">
@@ -855,7 +1085,7 @@ async function switchProv(name) {
               <span class="model-id">${esc(m.id)}</span>
               <span class="tier ${esc(m.tier)}">${esc(m.tier)}</span>
               ${(m.caps || []).filter(c => c !== 'text').map(c => `<span class="cap" title="${esc(capLabel[c] || c)}">${capSvg[c] || ''}</span>`).join('')}
-              <span class="model-price">${m.price ? '$'+m.price.in+' / $'+m.price.out : ''}</span>
+              <span class="model-price">${m.price ? '$'+m.price.in+(m.price.cacheIn != null ? ' <span style="opacity:0.5">(cache $'+m.price.cacheIn+')</span>' : '')+' / $'+m.price.out : ''}</span>
             </div>
             <div class="model-row2">
               <span class="model-desc">${esc(m.desc || '')}</span>
@@ -867,7 +1097,12 @@ async function switchProv(name) {
       <button class="btn pri" onclick="testConn()">Test Selected</button>
       <span style="font-size:12px;color:rgba(0,0,0,0.3)" id="testHint">${esc(selectedModel)}</span>
     </div>
-    <div class="result" id="tRes"></div>`;
+    <div class="result" id="tRes"></div>` : `
+    <div style="padding:20px;text-align:center;color:rgba(0,0,0,0.25);font-size:13px">
+      Add an API key to enable this provider
+    </div>`}`;
+
+  if (isRoot()) { keysDropdownOpen = false; loadProviderKeys(name); }
 }
 
 async function loadModels(provider) {
@@ -924,13 +1159,22 @@ async function saveK() {
   const url = document.getElementById('mUrl').value;
   if (!key) { showT('Please enter a key', 'error'); return; }
   try {
+    showT(`Saving & testing ${prov}...`, 'success');
     const d = await fetch(B + '/admin/key', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ provider: prov, apiKey: key, baseUrl: url || undefined })
     }).then(r => r.json());
-    if (d.success) { showT(`${prov} updated`, 'success'); closeM(); load(); }
-    else showT(d.error, 'error');
+    if (d.success) {
+      if (d.test?.passed) {
+        showT(`${prov} key saved & test passed (${d.test.model})`, 'success');
+      } else if (d.test) {
+        showT(`${prov} key saved but test failed: ${d.test.error}`, 'error');
+      } else {
+        showT(`${prov} key saved`, 'success');
+      }
+      closeM(); load();
+    } else showT(d.error, 'error');
   } catch (e) { showT(e.message, 'error'); }
 }
 
@@ -974,9 +1218,12 @@ async function loadProjects() {
       if (p.allowedModels?.length) {
         modelHtml = `<span class="proj-badge">${p.allowedModels.length} model${p.allowedModels.length > 1 ? 's' : ''}</span>`;
       }
+      if (p.smartRouting?.enabled) {
+        modelHtml += `<span class="proj-badge" style="background:rgba(0,122,255,0.08);color:#007aff">Smart Route</span>`;
+      }
       return `
         <div class="proj-item">
-          <button class="proj-toggle ${p.enabled ? 'on' : 'off'}" onclick="toggleProj('${safeName}', ${!p.enabled})"></button>
+          ${canWrite() ? `<button class="proj-toggle ${p.enabled ? 'on' : 'off'}" onclick="toggleProj('${safeName}', ${!p.enabled})"></button>` : ''}
           <div class="proj-info">
             <div class="proj-name">${safeName}</div>
             <div class="proj-key" onclick="revealAndCopy(this, '${safeKey}')" title="Click to reveal & copy">
@@ -986,11 +1233,11 @@ async function loadProjects() {
             ${(budgetHtml || modelHtml) ? `<div class="proj-meta">${modelHtml}${budgetHtml}</div>` : ''}
             <div class="proj-date">Created ${esc(date)}</div>
           </div>
-          <div class="proj-acts">
+          ${canWrite() ? `<div class="proj-acts">
             <button class="btn sm" onclick="openEditProj('${safeName}')">Edit</button>
             <button class="btn sm" onclick="regenProj('${safeName}')">Regen</button>
             <button class="btn sm" onclick="delProj('${safeName}')" style="color:#ff3b30">Del</button>
-          </div>
+          </div>` : ''}
         </div>`;
     }).join('');
   } catch {}
@@ -1016,18 +1263,55 @@ async function loadAllModels() {
   return all;
 }
 
-function renderModelChips(containerId, selected) {
-  const sel = new Set(selected || []);
-  loadAllModels().then(allModels => {
-    const container = document.getElementById(containerId);
-    container.innerHTML = allModels.map(id =>
-      `<span class="model-chip${sel.has(id) ? ' sel' : ''}" data-model="${esc(id)}" onclick="this.classList.toggle('sel')">${esc(id)}</span>`
-    ).join('');
-  });
+// Model allowlist: dropdown add + removable chips
+let allowedModelsMap = { proj: [], edit: [] };
+
+async function updateModelDropdown(selId, provId) {
+  const prov = document.getElementById(provId).value;
+  if (!modelsCache[prov]) {
+    try { modelsCache[prov] = await fetch(`${B}/models/${prov}`).then(r => r.json()); } catch { modelsCache[prov] = []; }
+  }
+  const sel = document.getElementById(selId);
+  sel.innerHTML = (modelsCache[prov] || []).map(m => `<option value="${m.id}">${m.id} (${m.tier})</option>`).join('');
 }
 
-function getSelectedModels(containerId) {
-  return [...document.querySelectorAll(`#${containerId} .model-chip.sel`)].map(c => c.dataset.model);
+function addModelToList(prefix) {
+  const prov = document.getElementById(prefix + 'ModelProv').value;
+  const model = document.getElementById(prefix + 'ModelSel').value;
+  if (!model) return;
+  const key = `${prov}/${model}`;
+  if (allowedModelsMap[prefix].some(m => m.key === key)) { showT('Already added', 'error'); return; }
+  allowedModelsMap[prefix].push({ key, model });
+  renderAllowedChips(prefix);
+}
+
+function removeModel(prefix, idx) {
+  allowedModelsMap[prefix].splice(idx, 1);
+  renderAllowedChips(prefix);
+}
+
+function renderAllowedChips(prefix) {
+  const container = document.getElementById(prefix + 'ModelChips');
+  container.innerHTML = allowedModelsMap[prefix].map((m, i) =>
+    `<span class="model-chip" onclick="removeModel('${prefix}',${i})" title="Click to remove">${esc(m.model)} &times;</span>`
+  ).join('') || '<span style="font-size:11px;color:rgba(0,0,0,0.3)">All models allowed</span>';
+}
+
+function getSelectedModels(prefix) {
+  return allowedModelsMap[prefix].map(m => m.model);
+}
+
+function initModelSelector(prefix, selected) {
+  allowedModelsMap[prefix] = (selected || []).map(id => ({ key: id, model: id }));
+  populateProviderSelect(prefix + 'ModelProv', 'openai');
+  updateModelDropdown(prefix + 'ModelSel', prefix + 'ModelProv');
+  renderAllowedChips(prefix);
+}
+
+// Edit modal tabs
+function switchEditTab(idx) {
+  document.querySelectorAll('#editProjOverlay .modal-tab').forEach((t, i) => t.classList.toggle('active', i === idx));
+  for (let i = 0; i < 3; i++) document.getElementById('editTab' + i).classList.toggle('active', i === idx);
 }
 
 function openProjM() {
@@ -1035,7 +1319,7 @@ function openProjM() {
   document.getElementById('projName').value = '';
   document.getElementById('projBudget').value = '';
   document.getElementById('projPeriod').value = '';
-  renderModelChips('projModelChips', []);
+  initModelSelector('proj', []);
 }
 function closeProjM() { document.getElementById('projOverlay').classList.remove('show'); }
 
@@ -1048,7 +1332,7 @@ async function addProj() {
     body.maxBudgetUsd = budget;
     body.budgetPeriod = document.getElementById('projPeriod').value || null;
   }
-  const models = getSelectedModels('projModelChips');
+  const models = getSelectedModels('proj');
   if (models.length) body.allowedModels = models;
   const d = await fetch(B + '/admin/projects', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1063,7 +1347,7 @@ async function addProj() {
 
 let editProjResetBudget = false;
 
-function openEditProj(name) {
+async function openEditProj(name) {
   const proj = projectsList.find(p => p.name === name);
   if (!proj) return;
   editProjResetBudget = false;
@@ -1072,8 +1356,100 @@ function openEditProj(name) {
   document.getElementById('editProjBudget').value = proj.maxBudgetUsd ?? '';
   document.getElementById('editProjPeriod').value = proj.budgetPeriod || '';
   document.getElementById('editProjSpent').textContent = `$${(proj.budgetUsedUsd || 0).toFixed(4)}`;
-  renderModelChips('editModelChips', proj.allowedModels || []);
+  // Models tab — dropdown-based
+  await loadAllModels();
+  initModelSelector('edit', proj.allowedModels || []);
+  // Smart routing tab
+  const sr = proj.smartRouting || {};
+  document.getElementById('editSmartEnabled').checked = sr.enabled === true;
+  populateProviderSelect('editSmartClassProv', sr.classifierProvider || 'deepseek');
+  populateProviderSelect('editSmartFallbackProv', sr.defaultModel?.provider || 'deepseek');
+  updateClassifierModels(sr.classifierModel);
+  updateFallbackModels(sr.defaultModel?.model);
+  renderSmartCandidates(sr.candidates || []);
+  toggleSmartUI();
+  // Reset to first tab
+  switchEditTab(0);
   document.getElementById('editProjOverlay').classList.add('show');
+}
+
+function toggleSmartUI() {
+  document.getElementById('smartRoutingUI').style.display =
+    document.getElementById('editSmartEnabled').checked ? '' : 'none';
+}
+
+function populateProviderSelect(selectId, selectedValue) {
+  const provs = ['openai','anthropic','gemini','deepseek','kimi','doubao','qwen','minimax'];
+  const sel = document.getElementById(selectId);
+  sel.innerHTML = provs.map(p => `<option value="${p}"${p === selectedValue ? ' selected' : ''}>${p}</option>`).join('');
+}
+
+async function updateClassifierModels(preselect) {
+  const prov = document.getElementById('editSmartClassProv').value;
+  if (!modelsCache[prov]) {
+    try { modelsCache[prov] = await fetch(`${B}/models/${prov}`).then(r => r.json()); } catch { modelsCache[prov] = []; }
+  }
+  const sel = document.getElementById('editSmartClassModel');
+  const models = modelsCache[prov] || [];
+  sel.innerHTML = models.map(m => `<option value="${m.id}"${m.id === preselect ? ' selected' : ''}>${m.id} (${m.tier})</option>`).join('');
+  if (!sel.value && models.length) sel.value = models[0].id;
+}
+
+async function updateFallbackModels(preselect) {
+  const prov = document.getElementById('editSmartFallbackProv').value;
+  if (!modelsCache[prov]) {
+    try { modelsCache[prov] = await fetch(`${B}/models/${prov}`).then(r => r.json()); } catch { modelsCache[prov] = []; }
+  }
+  const sel = document.getElementById('editSmartFallbackModel');
+  const models = modelsCache[prov] || [];
+  sel.innerHTML = models.map(m => `<option value="${m.id}"${m.id === preselect ? ' selected' : ''}>${m.id} (${m.tier})</option>`).join('');
+  if (!sel.value && models.length) sel.value = models[0].id;
+}
+
+let smartCandidatesList = [];
+
+function renderSmartCandidates(selected) {
+  smartCandidatesList = (selected || []).map(c => ({ provider: c.provider, model: c.model }));
+  renderSmartCandidateChips();
+  populateProviderSelect('smartCandProv', 'openai');
+  updateSmartCandModels();
+}
+
+function renderSmartCandidateChips() {
+  const container = document.getElementById('editSmartCandidates');
+  container.innerHTML = smartCandidatesList.map((c, i) =>
+    `<span class="model-chip sel" style="cursor:pointer" onclick="removeSmartCandidate(${i})" title="Click to remove">${esc(c.provider)}/${esc(c.model)} &times;</span>`
+  ).join('') || '<span style="font-size:11px;color:rgba(0,0,0,0.3)">No candidates added</span>';
+}
+
+async function updateSmartCandModels() {
+  const prov = document.getElementById('smartCandProv').value;
+  if (!modelsCache[prov]) {
+    try { modelsCache[prov] = await fetch(`${B}/models/${prov}`).then(r => r.json()); } catch { modelsCache[prov] = []; }
+  }
+  const sel = document.getElementById('smartCandModel');
+  const models = modelsCache[prov] || [];
+  sel.innerHTML = models.map(m => `<option value="${m.id}">${m.id} (${m.tier})</option>`).join('');
+}
+
+function addSmartCandidate() {
+  const prov = document.getElementById('smartCandProv').value;
+  const model = document.getElementById('smartCandModel').value;
+  if (!prov || !model) return;
+  if (smartCandidatesList.some(c => c.provider === prov && c.model === model)) {
+    showT('Already added', 'error'); return;
+  }
+  smartCandidatesList.push({ provider: prov, model });
+  renderSmartCandidateChips();
+}
+
+function removeSmartCandidate(idx) {
+  smartCandidatesList.splice(idx, 1);
+  renderSmartCandidateChips();
+}
+
+function getSmartCandidates() {
+  return smartCandidatesList;
 }
 function closeEditProj() { document.getElementById('editProjOverlay').classList.remove('show'); }
 function resetEditBudget() {
@@ -1089,8 +1465,24 @@ async function saveEditProj() {
   const budgetVal = document.getElementById('editProjBudget').value;
   body.maxBudgetUsd = budgetVal === '' ? null : parseFloat(budgetVal);
   body.budgetPeriod = document.getElementById('editProjPeriod').value || null;
-  body.allowedModels = getSelectedModels('editModelChips');
+  body.allowedModels = getSelectedModels('edit');
   if (editProjResetBudget) body.resetBudget = true;
+  // Smart routing
+  const smartEnabled = document.getElementById('editSmartEnabled').checked;
+  if (smartEnabled) {
+    body.smartRouting = {
+      enabled: true,
+      classifierProvider: document.getElementById('editSmartClassProv').value,
+      classifierModel: document.getElementById('editSmartClassModel').value,
+      defaultModel: {
+        provider: document.getElementById('editSmartFallbackProv').value,
+        model: document.getElementById('editSmartFallbackModel').value,
+      },
+      candidates: getSmartCandidates(),
+    };
+  } else {
+    body.smartRouting = null;
+  }
   const d = await fetch(`${B}/admin/projects/${encodeURIComponent(origName)}`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
@@ -1111,12 +1503,16 @@ async function toggleProj(name, enabled) {
 }
 
 async function regenProj(name) {
+  const ok = await confirmDangerous('Regenerate API Key', `This will invalidate the current API key for "${name}". All clients using the old key will stop working.`);
+  if (!ok) return;
   const d = await fetch(`${B}/admin/projects/${encodeURIComponent(name)}/regenerate`, { method: 'POST' }).then(r => r.json());
   if (d.success) { showT('Key regenerated', 'success'); loadProjects(); }
   else showT(d.error, 'error');
 }
 
 async function delProj(name) {
+  const ok = await confirmDangerous('Delete Project', `This will permanently delete project "${name}" and its API key. This action cannot be undone.`);
+  if (!ok) return;
   const d = await fetch(`${B}/admin/projects/${encodeURIComponent(name)}`, { method: 'DELETE' }).then(r => r.json());
   if (d.success) { showT(`${name} deleted`, 'success'); loadProjects(); }
   else showT(d.error, 'error');
@@ -1150,6 +1546,279 @@ function revealAndCopy(el, key) {
     lbl.textContent = 'Click to reveal key';
     el.appendChild(lbl);
   }, 5000);
+}
+
+// ============================================================
+// Multi-Key Management (per provider)
+// ============================================================
+let currentKeysProvider = '';
+let dragKeyId = null;
+let keysDropdownOpen = false;
+
+function toggleKeysDropdown() {
+  keysDropdownOpen = !keysDropdownOpen;
+  const panel = document.getElementById('keysPanel');
+  const arrow = document.getElementById('keysArrow');
+  if (panel) panel.classList.toggle('open', keysDropdownOpen);
+  if (arrow) arrow.style.transform = keysDropdownOpen ? 'rotate(90deg)' : '';
+  if (keysDropdownOpen) {
+    setTimeout(() => document.addEventListener('click', closeKeysOnOutside, { once: true }), 0);
+  }
+}
+function closeKeysOnOutside(e) {
+  const dd = document.querySelector('.keys-dropdown');
+  if (dd && !dd.contains(e.target)) {
+    keysDropdownOpen = false;
+    const panel = document.getElementById('keysPanel');
+    const arrow = document.getElementById('keysArrow');
+    if (panel) panel.classList.remove('open');
+    if (arrow) arrow.style.transform = '';
+  } else if (keysDropdownOpen) {
+    setTimeout(() => document.addEventListener('click', closeKeysOnOutside, { once: true }), 0);
+  }
+}
+
+async function loadProviderKeys(provider) {
+  currentKeysProvider = provider;
+  const el = document.getElementById('keysList');
+  if (!el) return;
+  try {
+    const keys = await fetch(`${B}/admin/keys/${encodeURIComponent(provider)}`).then(r => r.json());
+    if (!keys.length) {
+      el.innerHTML = '<div style="font-size:11px;color:rgba(0,0,0,0.25);padding:4px 0">No keys configured</div>';
+      return;
+    }
+    el.innerHTML = keys.map((k, i) => `
+      <div class="key-row" draggable="true" data-kid="${esc(k.id)}"
+           ondragstart="onKeyDragStart(event,'${esc(k.id)}')"
+           ondragover="onKeyDragOver(event)" ondrop="onKeyDrop(event,'${esc(k.id)}')"
+           ondragend="onKeyDragEnd(event)"
+           style="display:flex;align-items:center;gap:8px;padding:6px 4px;border-radius:8px;font-size:12px;${!k.enabled?'opacity:0.4':''}">
+        <span style="cursor:grab;color:rgba(0,0,0,0.2);font-size:14px" title="Drag to reorder">⠿</span>
+        <span style="font-weight:600;min-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(k.label)}</span>
+        <span style="color:rgba(0,0,0,0.3);font-family:monospace;font-size:11px">${esc(k.keyPreview)}</span>
+        ${k.project ? `<span style="display:inline-block;padding:1px 5px;border-radius:4px;font-size:10px;background:rgba(0,122,255,0.08);color:#007aff">${esc(k.project)}</span>` : '<span style="display:inline-block;padding:1px 5px;border-radius:4px;font-size:10px;background:rgba(0,0,0,0.04);color:rgba(0,0,0,0.35)">Public</span>'}
+        <span style="flex:1"></span>
+        <button onclick="toggleKeyEnabled('${esc(provider)}','${esc(k.id)}',${!k.enabled})" class="btn sm" style="font-size:10px;padding:2px 6px">${k.enabled ? 'On' : 'Off'}</button>
+        <button onclick="deleteProvKey('${esc(provider)}','${esc(k.id)}','${esc(k.label)}')" class="btn sm" style="font-size:10px;padding:2px 6px;color:#ff3b30">×</button>
+      </div>
+    `).join('');
+  } catch { el.innerHTML = '<div style="font-size:11px;color:#ff3b30">Failed to load keys</div>'; }
+}
+
+function openAddKey(provider) {
+  currentKeysProvider = provider;
+  document.getElementById('addKeyOverlay').classList.add('show');
+  document.getElementById('addKeyProvider').textContent = provider;
+  document.getElementById('addKeyLabel').value = '';
+  document.getElementById('addKeyValue').value = '';
+  // Populate project dropdown
+  const sel = document.getElementById('addKeyProject');
+  sel.innerHTML = '<option value="">Public (all projects)</option>' +
+    projectsList.map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join('');
+}
+
+function closeAddKey() { document.getElementById('addKeyOverlay').classList.remove('show'); }
+
+async function saveNewKey() {
+  const label = document.getElementById('addKeyLabel').value.trim();
+  const apiKey = document.getElementById('addKeyValue').value.trim();
+  const project = document.getElementById('addKeyProject').value || null;
+  if (!label) { showT('Enter a label', 'error'); return; }
+  if (!apiKey) { showT('Enter the API key', 'error'); return; }
+  showT(`Saving & testing ${currentKeysProvider}...`, 'success');
+  try {
+    const d = await fetch(`${B}/admin/keys/${encodeURIComponent(currentKeysProvider)}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label, apiKey, project })
+    }).then(r => r.json());
+    if (d.success) {
+      if (d.test?.passed) showT(`Key saved & test passed (${d.test.model}: "${d.test.reply}")`, 'success');
+      else if (d.test) showT(`Key saved but test failed: ${d.test.error}`, 'error');
+      else showT('Key saved', 'success');
+      closeAddKey();
+      load(); // refresh providers
+    } else showT(d.error, 'error');
+  } catch (e) { showT(e.message, 'error'); }
+}
+
+async function toggleKeyEnabled(provider, keyId, enabled) {
+  await fetch(`${B}/admin/keys/${encodeURIComponent(provider)}/${keyId}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled })
+  });
+  loadProviderKeys(provider);
+  load();
+}
+
+async function deleteProvKey(provider, keyId, label) {
+  const ok = await confirmDangerous('Delete API Key', `Delete key "${label}"? Projects using this key will fall back to next available key.`);
+  if (!ok) return;
+  await fetch(`${B}/admin/keys/${encodeURIComponent(provider)}/${keyId}`, { method: 'DELETE' });
+  showT('Key deleted', 'success');
+  loadProviderKeys(provider);
+  load();
+}
+
+// Drag-to-reorder
+function onKeyDragStart(e, id) {
+  dragKeyId = id;
+  e.dataTransfer.effectAllowed = 'move';
+  e.target.style.opacity = '0.5';
+}
+function onKeyDragOver(e) {
+  e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+  const row = e.target.closest('.key-row');
+  document.querySelectorAll('#keysList .key-row').forEach(r => r.classList.remove('drag-over'));
+  if (row) row.classList.add('drag-over');
+}
+function onKeyDragEnd(e) {
+  e.target.style.opacity = ''; dragKeyId = null;
+  document.querySelectorAll('#keysList .key-row').forEach(r => r.classList.remove('drag-over'));
+}
+async function onKeyDrop(e, targetId) {
+  e.preventDefault();
+  if (!dragKeyId || dragKeyId === targetId) return;
+  // Build new order from DOM
+  const rows = [...document.querySelectorAll('#keysList .key-row')];
+  const ids = rows.map(r => r.dataset.kid);
+  const fromIdx = ids.indexOf(dragKeyId);
+  const toIdx = ids.indexOf(targetId);
+  if (fromIdx < 0 || toIdx < 0) return;
+  ids.splice(fromIdx, 1);
+  ids.splice(toIdx, 0, dragKeyId);
+  await fetch(`${B}/admin/keys/${encodeURIComponent(currentKeysProvider)}/reorder`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ order: ids })
+  });
+  loadProviderKeys(currentKeysProvider);
+}
+
+// ============================================================
+// User Management
+// ============================================================
+let usersList = [];
+
+async function loadUserList() {
+  if (!canWrite()) return;
+  try {
+    usersList = await fetch(B + '/admin/users').then(r => r.json());
+    const list = document.getElementById('userList');
+    if (!usersList.length) {
+      list.innerHTML = '<div class="proj-empty">No users yet. Only the root account (ADMIN_SECRET) exists.</div>';
+      return;
+    }
+    list.innerHTML = usersList.map(u => {
+      const roleBadge = u.role === 'admin'
+        ? '<span style="display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:rgba(0,113,227,0.1);color:#0071e3">Admin</span>'
+        : '<span style="display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:rgba(0,0,0,0.05);color:rgba(0,0,0,0.45)">User</span>';
+      const projInfo = u.role === 'user' && u.projects?.length ? ` · ${u.projects.length} project${u.projects.length > 1 ? 's' : ''}` : '';
+      return `
+        <div class="proj-item">
+          <button class="proj-toggle ${u.enabled ? 'on' : 'off'}" onclick="toggleUser('${esc(u.username)}', ${!u.enabled})"></button>
+          <div class="proj-info">
+            <div class="proj-name">${esc(u.username)} ${roleBadge}</div>
+            <div class="proj-date">${u.enabled ? 'Active' : 'Disabled'}${projInfo} · Created ${new Date(u.createdAt).toLocaleDateString()}</div>
+          </div>
+          <div class="proj-acts">
+            <button class="btn sm" onclick="openUserModal('${esc(u.username)}')">Edit</button>
+            <button class="btn sm" onclick="deleteUser('${esc(u.username)}')" style="color:#ff3b30">Del</button>
+          </div>
+        </div>`;
+    }).join('');
+  } catch {}
+}
+
+function renderUserProjectChips(selected) {
+  const sel = new Set(selected || []);
+  const container = document.getElementById('userProjectChips');
+  container.innerHTML = projectsList.map(p =>
+    `<span class="model-chip${sel.has(p.name) ? ' sel' : ''}" data-model="${esc(p.name)}" onclick="this.classList.toggle('sel')">${esc(p.name)}</span>`
+  ).join('');
+}
+
+function openUserModal(username) {
+  const isEdit = !!username;
+  document.getElementById('userModalTitle').textContent = isEdit ? 'Edit User' : 'Add User';
+  document.getElementById('userEditName').value = username || '';
+  const unameInput = document.getElementById('userUsername');
+  if (isEdit) {
+    const u = usersList.find(u => u.username === username);
+    if (!u) return;
+    unameInput.value = u.username;
+    unameInput.readOnly = true;
+    document.getElementById('userPassword').value = '';
+    document.getElementById('userPassword').placeholder = 'Leave empty to keep current';
+    document.getElementById('userRole').value = u.role;
+    renderUserProjectChips(u.projects || []);
+  } else {
+    unameInput.value = '';
+    unameInput.readOnly = false;
+    document.getElementById('userPassword').value = '';
+    document.getElementById('userPassword').placeholder = 'Min 8 characters';
+    document.getElementById('userRole').value = 'user';
+    renderUserProjectChips([]);
+  }
+  updateUserProjectsVisibility();
+  document.getElementById('userOverlay').classList.add('show');
+}
+
+function closeUserModal() { document.getElementById('userOverlay').classList.remove('show'); }
+
+function updateUserProjectsVisibility() {
+  document.getElementById('userProjectsWrap').style.display = document.getElementById('userRole').value === 'user' ? '' : 'none';
+}
+document.getElementById('userRole').addEventListener('change', updateUserProjectsVisibility);
+
+async function saveUser() {
+  const editName = document.getElementById('userEditName').value;
+  const isEdit = !!editName;
+  const username = document.getElementById('userUsername').value.trim();
+  const password = document.getElementById('userPassword').value;
+  const role = document.getElementById('userRole').value;
+  const linkedProjects = [...document.querySelectorAll('#userProjectChips .model-chip.sel')].map(c => c.dataset.model);
+
+  if (!isEdit && !username) { showT('Enter username', 'error'); return; }
+  if (!isEdit && password.length < 8) { showT('Password must be at least 8 characters', 'error'); return; }
+
+  const body = { role };
+  if (role === 'user') body.projects = linkedProjects;
+  else body.projects = [];
+
+  if (isEdit) {
+    if (password) body.password = password;
+    const r = await fetch(`${B}/admin/users/${encodeURIComponent(editName)}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(r => r.json());
+    if (r.success) { showT('User updated', 'success'); closeUserModal(); loadUserList(); }
+    else showT(r.error, 'error');
+  } else {
+    body.username = username;
+    body.password = password;
+    const r = await fetch(B + '/admin/users', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(r => r.json());
+    if (r.success) { showT(`${username} created`, 'success'); closeUserModal(); loadUserList(); }
+    else showT(r.error, 'error');
+  }
+}
+
+async function toggleUser(username, enabled) {
+  await fetch(`${B}/admin/users/${encodeURIComponent(username)}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled })
+  });
+  loadUserList();
+}
+
+async function deleteUser(username) {
+  const ok = await confirmDangerous('Delete User', `This will permanently delete user "${username}". This action cannot be undone.`);
+  if (!ok) return;
+  const r = await fetch(`${B}/admin/users/${encodeURIComponent(username)}`, { method: 'DELETE' }).then(r => r.json());
+  if (r.success) { showT('User deleted', 'success'); loadUserList(); }
+  else showT(r.error, 'error');
 }
 
 // ============================================================
@@ -1481,8 +2150,8 @@ function renderBarChart(summary, currency) {
     .slice(0, 8);
 
   const isMobile = w < 400;
-  const barH = isMobile ? 18 : 24;
-  const labelH = isMobile ? 16 : 0;
+  const barH = isMobile ? 18 : 20;
+  const labelH = isMobile ? 16 : 16;
   const rowH = barH + labelH;
   const gap = isMobile ? 8 : 6;
   const padL = 10, padR = 10, padT = 4, padB = 4;
@@ -1530,40 +2199,31 @@ function renderBarChart(summary, currency) {
 
       // Bar below label
       const barY = rowY + labelH;
-      ctx.fillStyle = color + '40';
-      ctx.beginPath();
-      ctx.roundRect(padL, barY, bw, barH, 5);
-      ctx.fill();
-
+      ctx.globalAlpha = 0.7;
       ctx.fillStyle = color;
       ctx.beginPath();
       ctx.roundRect(padL, barY, bw, barH, 5);
-      ctx.globalAlpha = 0.7;
       ctx.fill();
       ctx.globalAlpha = 1;
     } else {
-      // Desktop: bar with label beside it
-      ctx.fillStyle = color + '40';
-      ctx.beginPath();
-      ctx.roundRect(padL, rowY, bw, barH, 6);
-      ctx.fill();
-
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.roundRect(padL, rowY, bw, barH, 6);
-      ctx.globalAlpha = 0.7;
-      ctx.fill();
-      ctx.globalAlpha = 1;
-
-      ctx.fillStyle = 'rgba(0,0,0,0.6)';
-      ctx.font = fontSize + "px 'SF Pro Display', -apple-system, sans-serif";
+      // Desktop: label row above bar (same as mobile for clarity)
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.font = fontSize + "px 'SF Mono', Menlo, 'SF Pro Display', -apple-system, sans-serif";
       ctx.textAlign = 'left';
-      ctx.fillText(shortName, padL + bw + 8, rowY + barH / 2 + 4);
+      ctx.fillText(modelKey, padL, rowY + fontSize);
 
       ctx.fillStyle = '#ff9500';
       ctx.font = "bold " + fontSize + "px 'SF Pro Display', -apple-system, sans-serif";
       ctx.textAlign = 'right';
-      ctx.fillText(fmtCost(cost, currency), w - padR, rowY + barH / 2 + 4);
+      ctx.fillText(fmtCost(cost, currency), w - padR, rowY + fontSize);
+
+      const barY = rowY + labelH;
+      ctx.globalAlpha = 0.7;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.roundRect(padL, barY, bw, barH, 5);
+      ctx.fill();
+      ctx.globalAlpha = 1;
     }
   }
 
@@ -1642,6 +2302,7 @@ window.addEventListener('resize', () => {
     loadProjects();
     loadUsage();
     loadActivity();
+    if (canWrite()) loadUserList();
   }
   setupChartTooltip('trendChart', 'trendTip');
   setupChartTooltip('barChart', 'barTip');

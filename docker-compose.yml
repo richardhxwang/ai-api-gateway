@@ -9,7 +9,7 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
-      - ai-api-proxy
+      - lumigate
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
       interval: 10s
@@ -18,9 +18,9 @@ services:
       start_period: 3s
 
   # App server — can be rebuilt/restarted without downtime
-  ai-api-proxy:
+  lumigate:
     build: .
-    container_name: ai-api-proxy
+    container_name: lumigate
     restart: unless-stopped
     # No ports exposed — only accessible via nginx
     expose:
@@ -30,16 +30,16 @@ services:
     volumes:
       - ./data:/app/data
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:9471/health"]
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:9471/health',r=>{r.statusCode===200?process.exit(0):process.exit(1)}).on('error',()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
     stop_grace_period: 15s
 
-  cloudflare-aigateway:
+  cloudflare-lumigate:
     image: cloudflare/cloudflared:latest
-    container_name: cloudflare-aigateway
+    container_name: cloudflare-lumigate
     command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN_AIGATEWAY}
     env_file:
       - .env

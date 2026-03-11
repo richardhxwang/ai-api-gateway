@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // ============================================================
-// AI API Gateway — Terminal UI Dashboard
+// LumiGate — Terminal UI Dashboard
 // Interactive full-screen terminal app using raw ANSI codes
 // No external dependencies — Node.js built-in modules only
 // ============================================================

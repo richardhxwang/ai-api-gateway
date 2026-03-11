@@ -22,7 +22,7 @@ check() {
 }
 
 echo "============================================"
-echo "  AI API Gateway v2 Test Suite"
+echo "  LumiGate v2 Test Suite"
 echo "============================================"
 
 # Health check

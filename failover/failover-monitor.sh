@@ -1,13 +1,13 @@
 #!/bin/bash
-# Failover monitor for ai-api-proxy (Plan A: Cold Standby)
+# Failover monitor for LumiGate (Plan A: Cold Standby)
 # Monitors primary NAS health, activates local instance on failure.
-# Install: launchctl load failover/com.ai-api-proxy.failover.plist
+# Install: launchctl load failover/com.lumigate.failover.plist
 
 # --- Configuration (override via environment) ---
 PRIMARY_HOST="${PRIMARY_HOST:-nas-ip}"
 PRIMARY_PORT="${PRIMARY_PORT:-9471}"
 LOCAL_COMPOSE_DIR="${LOCAL_COMPOSE_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
-DATA_SYNC_SOURCE="${DATA_SYNC_SOURCE:-${PRIMARY_HOST}:/path/to/ai-api-proxy/data/}"
+DATA_SYNC_SOURCE="${DATA_SYNC_SOURCE:-${PRIMARY_HOST}:/path/to/lumigate/data/}"
 DATA_SYNC_TARGET="${LOCAL_COMPOSE_DIR}/data/"
 CHECK_INTERVAL="${CHECK_INTERVAL:-10}"
 FAIL_THRESHOLD="${FAIL_THRESHOLD:-3}"

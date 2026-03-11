@@ -4,20 +4,20 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.ai-api-proxy.failover</string>
+  <string>com.lumigate.failover</string>
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
-    <string>/path/to/ai-api-proxy/failover/failover-monitor.sh</string>
+    <string>/path/to/lumigate/failover/failover-monitor.sh</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
   <true/>
   <key>StandardOutPath</key>
-  <string>/tmp/ai-api-proxy-failover.log</string>
+  <string>/tmp/lumigate-failover.log</string>
   <key>StandardErrorPath</key>
-  <string>/tmp/ai-api-proxy-failover.log</string>
+  <string>/tmp/lumigate-failover.log</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PRIMARY_HOST</key>

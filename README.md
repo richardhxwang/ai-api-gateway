@@ -1,13 +1,15 @@
-# AI API Gateway
+# LumiGate
 
-A self-hosted, multi-provider AI API gateway with usage tracking, cost estimation, and a built-in dashboard.
+**Enterprise-grade AI gateway. 24 MB footprint.**
 
-Nginx + Express.js. All your AI providers behind a single endpoint with hot maintenance.
+LumiGate is a self-hosted, multi-provider AI API gateway that delivers enterprise features — per-project budgets, model access control, token-level cost tracking, and high-availability failover — in a single Node.js process with zero external dependencies. No database, no Redis, no DevOps team required.
+
+Designed to run on a NAS, mini PC, or any edge device where every megabyte counts.
 
 ## Architecture
 
 <p align="center">
-  <img src="public/architecture.svg" alt="AI API Gateway Architecture" width="100%"/>
+  <img src="public/architecture.svg" alt="LumiGate Architecture" width="100%"/>
 </p>
 
 ## Features
@@ -32,8 +34,8 @@ Nginx + Express.js. All your AI providers behind a single endpoint with hot main
 ### 1. Clone and configure
 
 ```bash
-git clone https://github.com/richardhxwang/ai-api-gateway.git
-cd ai-api-gateway
+git clone https://github.com/richardhxwang/lumigate.git
+cd lumigate
 cp .env.example .env
 # Edit .env with your API keys
 ```
@@ -171,7 +173,7 @@ newprovider: [
 | **Input Sanitization** | Project names validated, `.env` writes sanitized, JSON body capped at 10MB |
 | **Path Allowlist** | Per-provider upstream path validation, normalized to match proxy rewrite rules |
 | **XSS Prevention** | HTML-escaped user data, no stack traces in error responses |
-| **Security Headers** | `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, no `X-Powered-By` |
+| **Security Headers** | `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Content-Security-Policy`, `Strict-Transport-Security`, no `X-Powered-By` |
 | **Docker Hardening** | Non-root user, `.dockerignore` excludes secrets, `server_tokens off` |
 | **Graceful Shutdown** | Connection draining, atomic data flush on SIGTERM |
 
@@ -199,8 +201,10 @@ Designed to run on lightweight hardware (NAS, mini PC) while supporting enterpri
 - **SSE tail buffer** — Only retains last 8KB of streaming responses for usage parsing (not full body)
 - **Gzip compression** — 70% size reduction (62KB → 19KB dashboard)
 - **In-memory caching** — Chat HTML cached at startup, one-time data directory check
+- **Usage query cache** — 5-second TTL response cache for analytics endpoints, auto-invalidated on writes
 - **Atomic writes** — All data files use tmp+rename pattern to prevent corruption
 - **Auto-pruning** — Usage data older than 365 days is automatically cleaned up
+- **Session cap** — 10k max sessions with FIFO eviction, prevents unbounded memory growth
 - **Nginx keepalive** — Connection pool to upstream, eliminates per-request TCP handshake
 
 ### Benchmark (Apple Mac mini M4, Docker)
@@ -212,7 +216,7 @@ Designed to run on lightweight hardware (NAS, mini PC) while supporting enterpri
 | Peak burst | 500 | 4,978 | 100ms | 0% |
 | Auth rejection (proxy path) | 200 | 4,240 | 47ms | 0% |
 
-**Resource usage:** ~93MB total (App 83MB + Nginx 10MB). Stable under sustained load with no memory leaks.
+**Resource usage:** ~24MB total (App 14MB + Nginx 10MB). Stable under sustained load with bounded session memory.
 
 ## Project Structure
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-# AI API Gateway — CLI Tool
+# LumiGate — CLI Tool
 # Quick terminal commands for managing the gateway
 # ============================================================
 set -euo pipefail
@@ -498,7 +498,7 @@ cmd_key() {
 
 cmd_help() {
   echo ""
-  echo -e "${BOLD}${BLUE}AI API Gateway — CLI${RESET}"
+  echo -e "${BOLD}${BLUE}LumiGate — CLI${RESET}"
   echo -e "${DIM}Manage your gateway from the terminal${RESET}"
   echo ""
   echo -e "${BOLD}Usage:${RESET}  $0 <command> [args]"

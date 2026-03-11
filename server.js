@@ -17,7 +17,47 @@ function safeEqual(a, b) {
   return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
+async function hashPassword(password, salt) {
+  salt = salt || crypto.randomBytes(16).toString('hex');
+  const hash = await new Promise((resolve, reject) =>
+    crypto.scrypt(password, salt, 64, (err, buf) => err ? reject(err) : resolve(buf.toString('hex')))
+  );
+  return { hash, salt };
+}
+
+async function verifyPassword(password, storedHash, salt) {
+  const { hash } = await hashPassword(password, salt);
+  return safeEqual(hash, storedHash);
+}
+
+// --- Encryption helpers for API key storage ---
+function deriveEncKey(secret) {
+  return crypto.scryptSync(secret, 'lumigate-enc-salt', 32);
+}
+
+function encryptValue(plaintext, secret) {
+  const key = deriveEncKey(secret);
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const enc = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return 'ENC:' + Buffer.concat([iv, tag, enc]).toString('base64');
+}
+
+function decryptValue(stored, secret) {
+  if (!stored.startsWith('ENC:')) return stored; // plaintext passthrough
+  const key = deriveEncKey(secret);
+  const buf = Buffer.from(stored.slice(4), 'base64');
+  const iv = buf.subarray(0, 12);
+  const tag = buf.subarray(12, 28);
+  const enc = buf.subarray(28);
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+  decipher.setAuthTag(tag);
+  return decipher.update(enc, undefined, 'utf8') + decipher.final('utf8');
+}
+
 const sessions = new Map();
+const MAX_SESSIONS = 10000;
 
 const app = express();
 app.disable("x-powered-by");
@@ -37,7 +77,10 @@ function parseCookies(req) {
   const cookies = {};
   (req.headers.cookie || "").split(";").forEach((c) => {
     const [k, ...v] = c.trim().split("=");
-    if (k) cookies[k.trim()] = decodeURIComponent(v.join("="));
+    if (k) {
+      try { cookies[k.trim()] = decodeURIComponent(v.join("=")); }
+      catch { /* ignore malformed cookie value */ }
+    }
   });
   return cookies;
 }
@@ -55,6 +98,29 @@ function validateProjectName(name) {
   if (name.length > 64) return false;
   if (/[<>"';&|`$\\]/.test(name)) return false;
   return true;
+}
+
+function validateSmartRouting(sr) {
+  if (!sr || typeof sr !== "object") return { enabled: false };
+  const providerNames = Object.keys(PROVIDERS);
+  const result = {
+    enabled: sr.enabled === true,
+    classifierProvider: providerNames.includes(sr.classifierProvider) ? sr.classifierProvider : "deepseek",
+    classifierModel: typeof sr.classifierModel === "string" ? sr.classifierModel.slice(0, 64) : "deepseek-chat",
+    candidates: [],
+  };
+  if (sr.defaultModel && typeof sr.defaultModel === "object"
+    && providerNames.includes(sr.defaultModel.provider)
+    && typeof sr.defaultModel.model === "string") {
+    result.defaultModel = { provider: sr.defaultModel.provider, model: sr.defaultModel.model.slice(0, 64) };
+  }
+  if (Array.isArray(sr.candidates)) {
+    result.candidates = sr.candidates
+      .filter(c => c && providerNames.includes(c.provider) && typeof c.model === "string")
+      .map(c => ({ provider: c.provider, model: c.model.slice(0, 64) }))
+      .slice(0, 20); // max 20 candidates
+  }
+  return result;
 }
 
 // F-03: Check if hostname resolves to a private/internal IP
@@ -102,6 +168,9 @@ const DATA_DIR = path.join(__dirname, "data");
 const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
 const USAGE_FILE = path.join(DATA_DIR, "usage.json");
 const RATE_FILE = path.join(DATA_DIR, "exchange-rate.json");
+const USERS_FILE = path.join(DATA_DIR, "users.json");
+const SETTINGS_FILE = path.join(DATA_DIR, "settings.json");
+const KEYS_FILE = path.join(DATA_DIR, "keys.json");
 
 let dataDirReady = false;
 function ensureDataDir() {
@@ -132,6 +201,93 @@ function saveProjects(list) {
 let projects = loadProjects();
 let projectsDirty = false;
 setInterval(() => { if (projectsDirty) { saveProjects(projects); projectsDirty = false; } }, 30000);
+
+function loadUsers() {
+  try {
+    ensureDataDir();
+    if (fs.existsSync(USERS_FILE)) return JSON.parse(fs.readFileSync(USERS_FILE, "utf8"));
+  } catch (e) { console.error("Failed to load users:", e.message); }
+  return [];
+}
+
+function saveUsers(list) {
+  ensureDataDir();
+  const tmp = USERS_FILE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(list, null, 2));
+  fs.renameSync(tmp, USERS_FILE);
+}
+
+let users = loadUsers();
+
+// --- Settings ---
+function loadSettings() {
+  try {
+    ensureDataDir();
+    if (fs.existsSync(SETTINGS_FILE)) return JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8"));
+  } catch {}
+  return {};
+}
+function saveSettings(s) {
+  ensureDataDir();
+  const tmp = SETTINGS_FILE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(s, null, 2));
+  fs.renameSync(tmp, SETTINGS_FILE);
+}
+let settings = loadSettings();
+
+// --- Multi-key management ---
+// keys: { provider: [{ id, label, key(encrypted), project: null|"name", enabled }] }
+function loadKeys() {
+  try {
+    ensureDataDir();
+    if (fs.existsSync(KEYS_FILE)) return JSON.parse(fs.readFileSync(KEYS_FILE, "utf8"));
+  } catch {}
+  return {};
+}
+function saveKeys(k) {
+  ensureDataDir();
+  const tmp = KEYS_FILE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(k, null, 2));
+  fs.renameSync(tmp, KEYS_FILE);
+}
+let providerKeys = loadKeys();
+
+// Migrate .env single keys to keys.json on first load
+function migrateEnvKeys() {
+  let migrated = false;
+  for (const [name, cfg] of Object.entries(PROVIDERS)) {
+    if (cfg.apiKey && (!providerKeys[name] || providerKeys[name].length === 0)) {
+      if (!providerKeys[name]) providerKeys[name] = [];
+      providerKeys[name].push({
+        id: crypto.randomBytes(8).toString('hex'),
+        label: 'Default',
+        key: encryptValue(cfg.apiKey, ADMIN_SECRET),
+        project: null,
+        enabled: true,
+      });
+      migrated = true;
+    }
+  }
+  if (migrated) saveKeys(providerKeys);
+}
+
+// Get the best API key for a provider+project combo
+function selectApiKey(providerName, projectName) {
+  const keys = (providerKeys[providerName] || []).filter(k => k.enabled);
+  // 1. Project-specific keys first (in order = priority)
+  const projKeys = keys.filter(k => k.project === projectName);
+  // 2. Public keys (project = null)
+  const pubKeys = keys.filter(k => !k.project);
+  const ordered = [...projKeys, ...pubKeys];
+  if (!ordered.length) return null;
+  // Decrypt first available key
+  for (const entry of ordered) {
+    try {
+      return { apiKey: decryptValue(entry.key, ADMIN_SECRET), keyId: entry.id, label: entry.label };
+    } catch { continue; }
+  }
+  return null;
+}
 
 // --- Budget helpers ---
 function checkBudgetReset(proj) {
@@ -279,6 +435,7 @@ function recordUsage(project, provider, model, tokens) {
   rec.cacheHitTokens += tokens.cacheHit || 0;
   rec.outputTokens += tokens.output || 0;
   usageDirty = true;
+  usageCache.ts = 0; summaryCache.ts = 0; // invalidate cache on new data
 }
 
 function getModelInfo(provider, modelId) {
@@ -318,6 +475,27 @@ function extractTokens(providerName, body) {
 
 function extractTokensFromSSE(providerName, chunks) {
   const lines = chunks.split("\n");
+  if (providerName === "anthropic") {
+    // Anthropic: message_start has input, message_delta has output
+    let input = 0, cacheHit = 0, output = 0, found = false;
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      try {
+        const j = JSON.parse(line.slice(6).trim());
+        if (j.type === "message_start" && j.message?.usage) {
+          input = j.message.usage.input_tokens || 0;
+          cacheHit = j.message.usage.cache_read_input_tokens || 0;
+          found = true;
+        }
+        if (j.type === "message_delta" && j.usage) {
+          output = j.usage.output_tokens || 0;
+          found = true;
+        }
+      } catch {}
+    }
+    return found ? { input, cacheHit, output } : null;
+  }
+  // OpenAI-compatible: usage in final chunk (requires stream_options.include_usage)
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i];
     if (!line.startsWith("data: ")) continue;
@@ -325,9 +503,6 @@ function extractTokensFromSSE(providerName, chunks) {
     if (data === "[DONE]") continue;
     try {
       const j = JSON.parse(data);
-      if (providerName === "anthropic" && j.type === "message_delta" && j.usage) {
-        return { input: 0, cacheHit: 0, output: j.usage.output_tokens || 0 };
-      }
       if (j.usage) return extractTokens(providerName, JSON.stringify(j));
     } catch {}
   }
@@ -335,63 +510,74 @@ function extractTokensFromSSE(providerName, chunks) {
 }
 
 // --- Provider & model config ---
+// M-01: Decrypt API keys if encrypted (ENC:...), passthrough plaintext for migration
+function decryptEnvKey(envVar) {
+  const val = process.env[envVar];
+  if (!val) return undefined;
+  try { return decryptValue(val, ADMIN_SECRET); } catch { return val; }
+}
+
 const PROVIDERS = {
-  openai: { baseUrl: process.env.OPENAI_BASE_URL || "https://api.openai.com", apiKey: process.env.OPENAI_API_KEY },
-  anthropic: { baseUrl: process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com", apiKey: process.env.ANTHROPIC_API_KEY },
-  gemini: { baseUrl: process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com", apiKey: process.env.GEMINI_API_KEY },
-  deepseek: { baseUrl: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com", apiKey: process.env.DEEPSEEK_API_KEY },
-  kimi: { baseUrl: process.env.KIMI_BASE_URL || "https://api.moonshot.cn", apiKey: process.env.KIMI_API_KEY },
-  doubao: { baseUrl: process.env.DOUBAO_BASE_URL || "https://ark.cn-beijing.volces.com/api/v3", apiKey: process.env.DOUBAO_API_KEY },
-  qwen: { baseUrl: process.env.QWEN_BASE_URL || "https://dashscope.aliyuncs.com/compatible-mode", apiKey: process.env.QWEN_API_KEY },
-  minimax: { baseUrl: process.env.MINIMAX_BASE_URL || "https://api.minimax.chat", apiKey: process.env.MINIMAX_API_KEY },
+  openai: { baseUrl: process.env.OPENAI_BASE_URL || "https://api.openai.com", apiKey: decryptEnvKey("OPENAI_API_KEY") },
+  anthropic: { baseUrl: process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com", apiKey: decryptEnvKey("ANTHROPIC_API_KEY") },
+  gemini: { baseUrl: process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com", apiKey: decryptEnvKey("GEMINI_API_KEY") },
+  deepseek: { baseUrl: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com", apiKey: decryptEnvKey("DEEPSEEK_API_KEY") },
+  kimi: { baseUrl: process.env.KIMI_BASE_URL || "https://api.moonshot.cn", apiKey: decryptEnvKey("KIMI_API_KEY") },
+  doubao: { baseUrl: process.env.DOUBAO_BASE_URL || "https://ark.cn-beijing.volces.com/api/v3", apiKey: decryptEnvKey("DOUBAO_API_KEY") },
+  qwen: { baseUrl: process.env.QWEN_BASE_URL || "https://dashscope.aliyuncs.com/compatible-mode", apiKey: decryptEnvKey("QWEN_API_KEY") },
+  minimax: { baseUrl: process.env.MINIMAX_BASE_URL || "https://api.minimax.chat", apiKey: decryptEnvKey("MINIMAX_API_KEY") },
 };
+
+// Migrate single .env keys to multi-key store
+migrateEnvKeys();
 
 const MODELS = {
   openai: [
     { id: "gpt-4.1-nano", tier: "economy", price: { in: 0.10, cacheIn: 0.025, out: 0.40 }, caps: ["text"], desc: "Classification, extraction, routing — lowest cost, 1M context" },
     { id: "gpt-4.1-mini", tier: "economy", price: { in: 0.40, cacheIn: 0.10, out: 1.60 }, caps: ["text", "image"], desc: "Summarization, simple code gen, 1M context, vision" },
     { id: "o3-mini", tier: "economy", price: { in: 1.10, cacheIn: 0.55, out: 4.40 }, caps: ["text"], desc: "Code gen, math reasoning — best value reasoning model" },
-    { id: "gpt-5-mini", tier: "standard", price: { in: 0.25, cacheIn: 0.0625, out: 2.00 }, caps: ["text", "image"], desc: "GPT-5 lite — everyday coding, writing, analysis" },
+    { id: "gpt-5-mini", tier: "standard", price: { in: 0.25, cacheIn: 0.025, out: 2.00 }, caps: ["text", "image"], desc: "GPT-5 lite — everyday coding, writing, analysis" },
     { id: "gpt-4.1", tier: "standard", price: { in: 2.00, cacheIn: 0.50, out: 8.00 }, caps: ["text", "image"], desc: "Instruction following, long docs, function calling, 1M context" },
     { id: "o4-mini", tier: "standard", price: { in: 1.10, cacheIn: 0.275, out: 4.40 }, caps: ["text", "image"], desc: "Multi-step tool orchestration, code execution, vision" },
     { id: "o3", tier: "flagship", price: { in: 2.00, cacheIn: 0.50, out: 8.00 }, caps: ["text", "image"], desc: "PhD-level science reasoning, competitive programming, 200K context" },
-    { id: "gpt-5", tier: "flagship", price: { in: 1.25, cacheIn: 0.3125, out: 10.00 }, caps: ["text", "image", "audio", "video"], desc: "Native multimodal flagship — image/audio/video input" },
-    { id: "gpt-5.4", tier: "flagship", price: { in: 2.50, cacheIn: 0.625, out: 15.00 }, caps: ["text", "image", "audio", "video"], desc: "Most capable GPT — all modalities, latest iteration" },
+    { id: "gpt-5", tier: "flagship", price: { in: 0.625, cacheIn: 0.0625, out: 5.00 }, caps: ["text", "image", "audio", "video"], desc: "Native multimodal flagship — image/audio/video input" },
+    { id: "gpt-5.4", tier: "flagship", price: { in: 2.50, cacheIn: 0.25, out: 15.00 }, caps: ["text", "image", "audio", "video"], desc: "Most capable GPT — all modalities, latest iteration" },
   ],
   anthropic: [
-    { id: "claude-haiku-4-5-20251001", tier: "economy", price: { in: 0.80, cacheIn: 0.08, out: 4.00 }, caps: ["text", "image", "pdf"], desc: "Code completion, classification, summarization — sub-second, 200K" },
+    { id: "claude-haiku-4-5-20251001", tier: "economy", price: { in: 1.00, cacheIn: 0.10, out: 5.00 }, caps: ["text", "image", "pdf"], desc: "Code completion, classification, summarization — sub-second, 200K" },
     { id: "claude-sonnet-4-5-20250514", tier: "standard", price: { in: 3.00, cacheIn: 0.30, out: 15.00 }, caps: ["text", "image", "pdf"], desc: "Extended thinking, complex coding, long-form writing" },
-    { id: "claude-opus-4-6", tier: "flagship", price: { in: 15.00, cacheIn: 1.50, out: 75.00 }, caps: ["text", "image", "pdf"], desc: "Autonomous coding, deep research, 200K analysis" },
+    { id: "claude-opus-4-6", tier: "flagship", price: { in: 5.00, cacheIn: 0.50, out: 25.00 }, caps: ["text", "image", "pdf"], desc: "Autonomous coding, deep research, 200K analysis" },
   ],
   gemini: [
-    { id: "gemini-2.5-flash-lite", tier: "economy", price: { in: 0.075, cacheIn: 0.01875, out: 0.30 }, freeRPD: 1500, caps: ["text", "image"], desc: "High-throughput summarization/classification — 1500 free/day" },
-    { id: "gemini-2.5-flash", tier: "standard", price: { in: 0.15, cacheIn: 0.0375, out: 0.60 }, freeRPD: 500, caps: ["text", "image", "audio", "video", "pdf"], desc: "Code gen, math reasoning, 1M context — 500 free/day" },
-    { id: "gemini-2.5-pro", tier: "flagship", price: { in: 1.25, cacheIn: 0.3125, out: 10.00 }, freeRPD: 25, caps: ["text", "image", "audio", "video", "pdf"], desc: "Multimodal video analysis, 1M context — 25 free/day" },
+    { id: "gemini-2.5-flash-lite", tier: "economy", price: { in: 0.10, cacheIn: 0.01, out: 0.40 }, freeRPD: 1500, caps: ["text", "image"], desc: "High-throughput summarization/classification — 1500 free/day" },
+    { id: "gemini-2.5-flash", tier: "standard", price: { in: 0.30, cacheIn: 0.03, out: 2.50 }, freeRPD: 500, caps: ["text", "image", "audio", "video", "pdf"], desc: "Code gen, math reasoning, 1M context — 500 free/day" },
+    { id: "gemini-2.5-pro", tier: "flagship", price: { in: 1.25, cacheIn: 0.125, out: 10.00 }, freeRPD: 25, caps: ["text", "image", "audio", "video", "pdf"], desc: "Multimodal video analysis, 1M context — 25 free/day" },
   ],
   deepseek: [
-    { id: "deepseek-chat", tier: "economy", price: { in: 0.27, cacheIn: 0.018, out: 1.10 }, caps: ["text"], desc: "Chat, translation, summarization, bulk text processing" },
-    { id: "deepseek-reasoner", tier: "flagship", price: { in: 0.55, cacheIn: 0.14, out: 2.19 }, caps: ["text"], desc: "Math proofs, competitive programming, CoT deep reasoning" },
+    { id: "deepseek-chat", tier: "economy", price: { in: 0.28, cacheIn: 0.028, out: 0.42 }, caps: ["text"], desc: "V3.2 — chat, translation, summarization, bulk text, 128K" },
+    { id: "deepseek-reasoner", tier: "standard", price: { in: 0.55, cacheIn: 0.14, out: 2.19 }, caps: ["text"], desc: "V3.2 thinking mode — math, competitive programming, CoT reasoning, 128K" },
   ],
   kimi: [
-    { id: "moonshot-v1-8k", tier: "economy", price: { in: 1.67, cacheIn: 0.42, out: 1.67 }, caps: ["text"], desc: "Fast chat, 8K context" },
-    { id: "moonshot-v1-32k", tier: "standard", price: { in: 3.33, cacheIn: 0.83, out: 3.33 }, caps: ["text"], desc: "Long document QA, 32K context" },
-    { id: "moonshot-v1-128k", tier: "standard", price: { in: 8.33, cacheIn: 2.08, out: 8.33 }, caps: ["text"], desc: "Ultra-long context, 128K window" },
-    { id: "kimi-k2", tier: "flagship", price: { in: 8.33, cacheIn: 2.08, out: 8.33 }, caps: ["text", "image"], desc: "Latest flagship — agentic coding, multi-step reasoning" },
+    { id: "moonshot-v1-8k", tier: "economy", price: { in: 0.20, cacheIn: 0.05, out: 2.00 }, caps: ["text"], desc: "Legacy fast chat, 8K context" },
+    { id: "kimi-k2", tier: "standard", price: { in: 0.60, cacheIn: 0.15, out: 2.50 }, caps: ["text"], desc: "1T MoE — agentic reasoning, tool calling, 131K context" },
+    { id: "kimi-k2-thinking", tier: "standard", price: { in: 0.60, cacheIn: 0.15, out: 2.50 }, caps: ["text"], desc: "K2 deep reasoning — extended thinking, chain-of-thought, 131K" },
+    { id: "kimi-k2.5", tier: "flagship", price: { in: 0.60, cacheIn: 0.10, out: 3.00 }, caps: ["text", "image"], desc: "Latest flagship — native multimodal, agent swarm, 256K context" },
   ],
   doubao: [
-    { id: "doubao-1.5-lite-32k", tier: "economy", price: { in: 0.04, cacheIn: 0.01, out: 0.08 }, caps: ["text"], desc: "Ultra-low cost, 32K context — ideal for bulk tasks" },
-    { id: "doubao-1.5-pro-32k", tier: "standard", price: { in: 0.11, cacheIn: 0.03, out: 0.28 }, caps: ["text", "image"], desc: "Balanced performance, 32K context, vision" },
-    { id: "doubao-1.5-pro-256k", tier: "flagship", price: { in: 0.69, cacheIn: 0.17, out: 1.25 }, caps: ["text", "image"], desc: "Long-context flagship, 256K window, vision" },
+    { id: "doubao-seed-2.0-mini", tier: "economy", price: { in: 0.028, cacheIn: 0.006, out: 0.28 }, caps: ["text", "image"], desc: "Low latency, 256K context, 4-level thinking" },
+    { id: "doubao-seed-2.0-lite", tier: "standard", price: { in: 0.083, cacheIn: 0.017, out: 0.50 }, caps: ["text", "image"], desc: "General production, 256K context, surpasses Seed 1.8" },
+    { id: "doubao-seed-2.0-pro", tier: "flagship", price: { in: 0.44, cacheIn: 0.089, out: 2.22 }, caps: ["text", "image"], desc: "Frontier reasoning, 256K context, video understanding" },
   ],
   qwen: [
-    { id: "qwen-turbo", tier: "economy", price: { in: 0.04, cacheIn: 0.01, out: 0.08 }, caps: ["text"], desc: "Fast and cheap — classification, extraction, simple QA" },
-    { id: "qwen-plus", tier: "standard", price: { in: 0.11, cacheIn: 0.03, out: 0.28 }, caps: ["text", "image"], desc: "Balanced — coding, analysis, 128K context, vision" },
-    { id: "qwen-max", tier: "flagship", price: { in: 0.28, cacheIn: 0.07, out: 0.83 }, caps: ["text", "image"], desc: "Most capable Qwen — complex reasoning, long-form writing" },
-    { id: "qwen-long", tier: "standard", price: { in: 0.07, cacheIn: 0.02, out: 0.14 }, caps: ["text"], desc: "10M context window — book-length document analysis" },
+    { id: "qwen-flash", tier: "economy", price: { in: 0.021, cacheIn: 0.004, out: 0.207 }, caps: ["text"], desc: "Fastest & cheapest Qwen — replaces qwen-turbo, 1M context" },
+    { id: "qwen3.5-plus", tier: "standard", price: { in: 0.11, cacheIn: 0.022, out: 0.662 }, caps: ["text", "image"], desc: "Near-max quality, native multimodal (image+video), 1M context" },
+    { id: "qwen3-max", tier: "flagship", price: { in: 0.345, cacheIn: 0.069, out: 1.379 }, caps: ["text"], desc: "Best reasoning — complex multi-step tasks, thinking mode, 262K" },
+    { id: "qwen-long", tier: "standard", price: { in: 0.069, cacheIn: 0.014, out: 0.276 }, caps: ["text"], desc: "10M context window — book-length document analysis" },
   ],
   minimax: [
-    { id: "MiniMax-Text-01", tier: "standard", price: { in: 0.40, cacheIn: 0.10, out: 1.10 }, caps: ["text"], desc: "256K context, strong at structured output and function calling" },
-    { id: "MiniMax-Text-01-128k", tier: "economy", price: { in: 0.20, cacheIn: 0.05, out: 0.55 }, caps: ["text"], desc: "128K context, cost-efficient variant" },
+    { id: "MiniMax-M2", tier: "economy", price: { in: 0.29, cacheIn: 0.029, out: 1.16 }, caps: ["text"], desc: "Compact high-efficiency — coding, agentic workflows, 196K" },
+    { id: "MiniMax-M2.1", tier: "standard", price: { in: 0.29, cacheIn: 0.029, out: 1.16 }, caps: ["text"], desc: "Optimized for coding and agentic workflows, 196K context" },
+    { id: "MiniMax-M2.5", tier: "flagship", price: { in: 0.29, cacheIn: 0.029, out: 1.16 }, caps: ["text"], desc: "SOTA coding (SWE-Bench 80.2%), agentic tool use, 200K context" },
   ],
 };
 
@@ -462,33 +648,61 @@ function adminAuth(req, res, next) {
   const token = cookies.admin_token || req.headers["x-admin-token"];
   if (!token) return res.status(401).json({ error: "Unauthorized" });
 
-  // F-07: Accept raw ADMIN_SECRET directly (for CLI/TUI)
-  if (safeEqual(token, ADMIN_SECRET)) return next();
+  // Raw ADMIN_SECRET = root (for CLI/TUI backward compat)
+  if (safeEqual(token, ADMIN_SECRET)) {
+    req.userRole = "root";
+    req.userName = "_root";
+    return next();
+  }
 
-  // Accept session token
   if (!sessions.has(token)) return res.status(401).json({ error: "Unauthorized" });
-  const created = sessions.get(token);
+  const session = sessions.get(token);
   const maxAge = 24 * 60 * 60 * 1000;
-  if (Date.now() - created > maxAge) {
+  if (Date.now() - session.createdAt > maxAge) {
     sessions.delete(token);
     return res.status(401).json({ error: "Unauthorized" });
   }
-  // Clean up expired sessions
-  for (const [k, v] of sessions) {
-    if (Date.now() - v > maxAge) sessions.delete(k);
+  req.userRole = session.role;
+  req.userName = session.username;
+  // Also store projects the user is linked to (for "user" role)
+  if (session.role === "user") {
+    const u = users.find(u => u.username === session.username);
+    req.userProjects = u?.projects || [];
   }
   return next();
 }
 
-// Check if request has valid admin session (non-middleware, returns boolean)
-function hasAdminSession(req) {
+// Periodic session cleanup (every 5 min instead of per-request)
+setInterval(() => {
+  const maxAge = 24 * 60 * 60 * 1000;
+  for (const [k, v] of sessions) {
+    if (Date.now() - v.createdAt > maxAge) sessions.delete(k);
+  }
+}, 5 * 60 * 1000);
+
+function requireRole(...roles) {
+  return (req, res, next) => {
+    if (!roles.includes(req.userRole)) {
+      return res.status(403).json({ error: "Insufficient permissions" });
+    }
+    next();
+  };
+}
+
+// Check if request has valid admin session — returns role string or false
+function getSessionRole(req) {
   const cookies = parseCookies(req);
   const token = cookies.admin_token;
   if (!token) return false;
-  if (safeEqual(token, ADMIN_SECRET)) return true;
+  if (safeEqual(token, ADMIN_SECRET)) return "root";
   if (!sessions.has(token)) return false;
-  const created = sessions.get(token);
-  return (Date.now() - created) <= 24 * 60 * 60 * 1000;
+  const session = sessions.get(token);
+  if (Date.now() - session.createdAt > 24 * 60 * 60 * 1000) return false;
+  return session.role;
+}
+
+function hasAdminSession(req) {
+  return !!getSessionRole(req);
 }
 
 // ============================================================
@@ -498,17 +712,23 @@ function hasAdminSession(req) {
 // Health check — used by Docker healthcheck
 app.get("/health", (req, res) => {
   const available = Object.entries(PROVIDERS)
-    .filter(([, cfg]) => cfg.apiKey)
+    .filter(([name]) => (providerKeys[name] || []).some(k => k.enabled))
     .map(([name]) => name);
   res.json({ status: "ok", providers: available, uptime: Math.floor((Date.now() - startTime) / 1000) });
 });
 
 app.get("/providers", (req, res) => {
-  res.json(Object.entries(PROVIDERS).map(([name, cfg]) => ({
-    name,
-    baseUrl: cfg.baseUrl,
-    available: !!cfg.apiKey,
-  })));
+  res.json(Object.entries(PROVIDERS).map(([name, cfg]) => {
+    const allKeys = providerKeys[name] || [];
+    const enabledKeys = allKeys.filter(k => k.enabled);
+    return {
+      name,
+      baseUrl: cfg.baseUrl,
+      available: enabledKeys.length > 0,
+      keyCount: allKeys.length,
+      enabledCount: enabledKeys.length,
+    };
+  }));
 });
 
 app.get("/models/:provider", (req, res) => {
@@ -525,11 +745,10 @@ app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-// F-02: Serve chat — requires admin session (no key exposed to browser)
+// F-02: Serve chat — requires root/admin session (no key exposed to browser)
 app.get("/chat", (req, res) => {
-  if (!hasAdminSession(req)) {
-    return res.redirect("/");
-  }
+  const role = getSessionRole(req);
+  if (!role || role === "user") return res.redirect("/");
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
   res.sendFile(path.join(__dirname, "public", "chat.html"));
 });
@@ -537,21 +756,40 @@ app.get("/chat", (req, res) => {
 // ============================================================
 // Admin auth: login/logout
 // ============================================================
-app.post("/admin/login", loginLimiter, (req, res) => {
-  if (safeEqual(req.body.secret, ADMIN_SECRET)) {
-    const sessionToken = crypto.randomBytes(32).toString('hex');
-    sessions.set(sessionToken, Date.now());
-    res.cookie("admin_token", sessionToken, { httpOnly: true, sameSite: "Strict", secure: true, path: "/", maxAge: 86400000 });
-    return res.json({ success: true });
+app.post("/admin/login", loginLimiter, async (req, res) => {
+  // Flow 1: ADMIN_SECRET (root)
+  if (req.body.secret) {
+    if (safeEqual(req.body.secret, ADMIN_SECRET)) {
+      const sessionToken = crypto.randomBytes(32).toString('hex');
+      if (sessions.size >= MAX_SESSIONS) sessions.delete(sessions.keys().next().value);
+      sessions.set(sessionToken, { createdAt: Date.now(), role: "root", username: "_root" });
+      const isSecure = req.secure || req.headers["x-forwarded-proto"] === "https" || (req.headers["cf-visitor"] || "").includes("https");
+      res.cookie("admin_token", sessionToken, { httpOnly: true, sameSite: "Strict", secure: isSecure, path: "/", maxAge: 86400000 });
+      return res.json({ success: true, role: "root" });
+    }
+    return res.status(401).json({ error: "Invalid admin secret" });
   }
-  res.status(401).json({ error: "Invalid admin secret" });
+  // Flow 2: username/password
+  const { username, password } = req.body;
+  if (!username || !password) return res.status(400).json({ error: "Credentials required" });
+  const user = users.find(u => u.username === username && u.enabled);
+  if (!user || !await verifyPassword(password, user.passwordHash, user.salt)) {
+    return res.status(401).json({ error: "Invalid credentials" });
+  }
+  const sessionToken = crypto.randomBytes(32).toString('hex');
+  if (sessions.size >= MAX_SESSIONS) sessions.delete(sessions.keys().next().value);
+  sessions.set(sessionToken, { createdAt: Date.now(), role: user.role, username: user.username });
+  const isSecure = req.secure || req.headers["x-forwarded-proto"] === "https" || (req.headers["cf-visitor"] || "").includes("https");
+  res.cookie("admin_token", sessionToken, { httpOnly: true, sameSite: "Strict", secure: isSecure, path: "/", maxAge: 86400000 });
+  res.json({ success: true, role: user.role });
 });
 
 app.post("/admin/logout", (req, res) => {
   const cookies = parseCookies(req);
   const token = cookies.admin_token;
   if (token) sessions.delete(token);
-  res.clearCookie("admin_token", { httpOnly: true, sameSite: "Strict", secure: true, path: "/" });
+  const isSecure = req.secure || req.headers["x-forwarded-proto"] === "https" || (req.headers["cf-visitor"] || "").includes("https");
+  res.clearCookie("admin_token", { httpOnly: true, sameSite: "Strict", secure: isSecure, path: "/" });
   res.json({ success: true });
 });
 
@@ -559,14 +797,26 @@ app.post("/admin/logout", (req, res) => {
 app.get("/admin/auth", adminLimiter, (req, res) => {
   const cookies = parseCookies(req);
   const token = cookies.admin_token || req.headers["x-admin-token"];
-  if (!token || !sessions.has(token)) return res.json({ authenticated: false });
-  const created = sessions.get(token);
+  if (!token) return res.json({ authenticated: false });
+
+  // Raw admin secret
+  if (safeEqual(token, ADMIN_SECRET)) {
+    return res.json({ authenticated: true, role: "root", username: "_root" });
+  }
+
+  if (!sessions.has(token)) return res.json({ authenticated: false });
+  const session = sessions.get(token);
   const maxAge = 24 * 60 * 60 * 1000;
-  if (Date.now() - created > maxAge) {
+  if (Date.now() - session.createdAt > maxAge) {
     sessions.delete(token);
     return res.json({ authenticated: false });
   }
-  res.json({ authenticated: true });
+  const resp = { authenticated: true, role: session.role, username: session.username };
+  if (session.role === "user") {
+    const u = users.find(u => u.username === session.username);
+    resp.projects = u?.projects || [];
+  }
+  res.json(resp);
 });
 
 // ============================================================
@@ -588,7 +838,7 @@ app.get("/admin/uptime", (req, res) => {
 });
 
 // Test provider
-app.get("/admin/test/:provider", async (req, res) => {
+app.get("/admin/test/:provider", requireRole("root", "admin"), async (req, res) => {
   const name = req.params.provider.toLowerCase();
   const provider = PROVIDERS[name];
   if (!provider || !provider.apiKey) {
@@ -642,10 +892,15 @@ app.get("/admin/test/:provider", async (req, res) => {
 
 // --- Project Keys CRUD ---
 app.get("/admin/projects", (req, res) => {
+  if (req.userRole === "user") {
+    return res.json(projects
+      .filter(p => (req.userProjects || []).includes(p.name))
+      .map(({ key, ...rest }) => rest));
+  }
   res.json(projects);
 });
 
-app.post("/admin/projects", (req, res) => {
+app.post("/admin/projects", requireRole("root", "admin"), (req, res) => {
   const { name, maxBudgetUsd, budgetPeriod, allowedModels } = req.body;
   if (!validateProjectName(name)) {
     return res.json({ success: false, error: "Invalid project name (max 64 chars, no special chars)" });
@@ -666,12 +921,16 @@ app.post("/admin/projects", (req, res) => {
   if (Array.isArray(allowedModels) && allowedModels.length > 0) {
     project.allowedModels = allowedModels.filter(m => typeof m === "string" && m.length > 0);
   }
+  // Smart routing
+  if (req.body.smartRouting) {
+    project.smartRouting = validateSmartRouting(req.body.smartRouting);
+  }
   projects.push(project);
   saveProjects(projects);
   res.json({ success: true, project });
 });
 
-app.put("/admin/projects/:name", (req, res) => {
+app.put("/admin/projects/:name", requireRole("root", "admin"), (req, res) => {
   const proj = projects.find((p) => p.name === req.params.name);
   if (!proj) return res.json({ success: false, error: "project not found" });
   if (req.body.enabled !== undefined) proj.enabled = req.body.enabled;
@@ -708,11 +967,19 @@ app.put("/admin/projects/:name", (req, res) => {
       proj.allowedModels = req.body.allowedModels.filter(m => typeof m === "string" && m.length > 0);
     }
   }
+  // Smart routing update
+  if (req.body.smartRouting !== undefined) {
+    if (req.body.smartRouting === null || req.body.smartRouting === false) {
+      delete proj.smartRouting;
+    } else {
+      proj.smartRouting = validateSmartRouting(req.body.smartRouting);
+    }
+  }
   saveProjects(projects);
   res.json({ success: true, project: proj });
 });
 
-app.post("/admin/projects/:name/regenerate", (req, res) => {
+app.post("/admin/projects/:name/regenerate", requireRole("root", "admin"), (req, res) => {
   const proj = projects.find((p) => p.name === req.params.name);
   if (!proj) return res.json({ success: false, error: "project not found" });
   proj.key = "pk_" + crypto.randomBytes(24).toString("hex");
@@ -720,7 +987,7 @@ app.post("/admin/projects/:name/regenerate", (req, res) => {
   res.json({ success: true, project: proj });
 });
 
-app.delete("/admin/projects/:name", (req, res) => {
+app.delete("/admin/projects/:name", requireRole("root", "admin"), (req, res) => {
   const idx = projects.findIndex((p) => p.name === req.params.name);
   if (idx === -1) return res.json({ success: false, error: "project not found" });
   projects.splice(idx, 1);
@@ -734,40 +1001,69 @@ app.get("/admin/rate", (req, res) => {
 });
 
 // --- Usage API ---
-app.get("/admin/usage", (req, res) => {
-  const days = Math.min(Math.max(parseInt(req.query.days) || 30, 1), 365);
-  const filterProject = req.query.project;
+// Build daily count aggregations in a single pass (shared by both endpoints)
+function buildDailyCounts(days, perProject) {
   const now = new Date();
-  const result = [];
-
-  const dailyCounts = {};
+  const dailyCounts = {};       // global: { dateKey: { modelKey: count } }
+  const projectDailyCounts = {}; // per-project: { dateKey: { project: { modelKey: count } } }
   for (let i = 0; i < days; i++) {
     const d = new Date(now); d.setDate(d.getDate() - i);
     const dateKey = d.toISOString().slice(0, 10);
     const dayData = usageData[dateKey];
     if (!dayData) continue;
-    dailyCounts[dateKey] = {};
-    for (const [, models] of Object.entries(dayData)) {
+    for (const [proj, models] of Object.entries(dayData)) {
       for (const [modelKey, stats] of Object.entries(models)) {
-        dailyCounts[dateKey][modelKey] = (dailyCounts[dateKey][modelKey] || 0) + stats.count;
+        if (perProject) {
+          if (!projectDailyCounts[dateKey]) projectDailyCounts[dateKey] = {};
+          if (!projectDailyCounts[dateKey][proj]) projectDailyCounts[dateKey][proj] = {};
+          projectDailyCounts[dateKey][proj][modelKey] = (projectDailyCounts[dateKey][proj][modelKey] || 0) + stats.count;
+        } else {
+          if (!dailyCounts[dateKey]) dailyCounts[dateKey] = {};
+          dailyCounts[dateKey][modelKey] = (dailyCounts[dateKey][modelKey] || 0) + stats.count;
+        }
       }
     }
   }
+  return { dailyCounts, projectDailyCounts };
+}
+
+// Short TTL cache for usage responses (avoids recomputation on rapid dashboard refreshes)
+let usageCache = { key: null, data: null, ts: 0 };
+let summaryCache = { key: null, data: null, ts: 0 };
+const USAGE_CACHE_TTL = 5000; // 5 seconds
+
+app.get("/admin/usage", (req, res) => {
+  const days = Math.min(Math.max(parseInt(req.query.days) || 30, 1), 365);
+  const filterProject = req.query.project || "";
+  const userProjects = req.userRole === "user" ? new Set(req.userProjects || []) : null;
+  const cacheKey = `${days}:${filterProject}:${req.userRole}:${[...(userProjects || [])].join(",")}`;
+  const now = Date.now();
+  if (usageCache.key === cacheKey && now - usageCache.ts < USAGE_CACHE_TTL) {
+    return res.json(usageCache.data);
+  }
+
+  const perProject = settings.freeTierMode === "per-project";
+  const { dailyCounts, projectDailyCounts } = buildDailyCounts(days, perProject);
+  const result = [];
+  const nowDate = new Date();
 
   for (let i = 0; i < days; i++) {
-    const d = new Date(now); d.setDate(d.getDate() - i);
+    const d = new Date(nowDate); d.setDate(d.getDate() - i);
     const dateKey = d.toISOString().slice(0, 10);
     const dayData = usageData[dateKey];
     if (!dayData) continue;
     for (const [project, models] of Object.entries(dayData)) {
       if (filterProject && project !== filterProject) continue;
+      if (userProjects && !userProjects.has(project)) continue;
       for (const [modelKey, stats] of Object.entries(models)) {
         const [provider, ...modelParts] = modelKey.split("/");
         const modelId = modelParts.join("/");
         const info = getModelInfo(provider, modelId);
         const price = info?.price || null;
         const freeRPD = info?.freeRPD || 0;
-        const dailyCount = dailyCounts[dateKey]?.[modelKey] || 0;
+        const dailyCount = perProject
+          ? (projectDailyCounts[dateKey]?.[project]?.[modelKey] || 0)
+          : (dailyCounts[dateKey]?.[modelKey] || 0);
         result.push({
           date: dateKey, project, provider, model: modelId,
           ...stats,
@@ -776,35 +1072,32 @@ app.get("/admin/usage", (req, res) => {
       }
     }
   }
+  usageCache = { key: cacheKey, data: result, ts: now };
   res.json(result);
 });
 
 app.get("/admin/usage/summary", (req, res) => {
   const days = Math.min(Math.max(parseInt(req.query.days) || 30, 1), 365);
-  const now = new Date();
-  const byProject = {};
-  let totalCost = 0, totalRequests = 0;
-
-  const dailyCounts = {};
-  for (let i = 0; i < days; i++) {
-    const d = new Date(now); d.setDate(d.getDate() - i);
-    const dateKey = d.toISOString().slice(0, 10);
-    const dayData = usageData[dateKey];
-    if (!dayData) continue;
-    dailyCounts[dateKey] = {};
-    for (const [, models] of Object.entries(dayData)) {
-      for (const [modelKey, stats] of Object.entries(models)) {
-        dailyCounts[dateKey][modelKey] = (dailyCounts[dateKey][modelKey] || 0) + stats.count;
-      }
-    }
+  const userProjects = req.userRole === "user" ? new Set(req.userProjects || []) : null;
+  const cacheKey = `${days}:${req.userRole}:${[...(userProjects || [])].join(",")}`;
+  const now = Date.now();
+  if (summaryCache.key === cacheKey && now - summaryCache.ts < USAGE_CACHE_TTL) {
+    return res.json(summaryCache.data);
   }
 
+  const nowDate = new Date();
+  const byProject = {};
+  let totalCost = 0, totalRequests = 0;
+  const perProject = settings.freeTierMode === "per-project";
+  const { dailyCounts, projectDailyCounts } = buildDailyCounts(days, perProject);
+
   for (let i = 0; i < days; i++) {
-    const d = new Date(now); d.setDate(d.getDate() - i);
+    const d = new Date(nowDate); d.setDate(d.getDate() - i);
     const dateKey = d.toISOString().slice(0, 10);
     const dayData = usageData[dateKey];
     if (!dayData) continue;
     for (const [project, models] of Object.entries(dayData)) {
+      if (userProjects && !userProjects.has(project)) continue;
       if (!byProject[project]) byProject[project] = { requests: 0, inputTokens: 0, cacheHitTokens: 0, outputTokens: 0, cost: 0, models: {} };
       const p = byProject[project];
       for (const [modelKey, stats] of Object.entries(models)) {
@@ -824,7 +1117,9 @@ app.get("/admin/usage/summary", (req, res) => {
         const info = getModelInfo(provider, modelId);
         const price = info?.price || null;
         const freeRPD = info?.freeRPD || 0;
-        const dailyCount = dailyCounts[dateKey]?.[modelKey] || 0;
+        const dailyCount = perProject
+          ? (projectDailyCounts[dateKey]?.[project]?.[modelKey] || 0)
+          : (dailyCounts[dateKey]?.[modelKey] || 0);
         const c = calcCost(price, stats, freeRPD, dailyCount);
         pm.cost += c; p.cost += c; totalCost += c;
       }
@@ -835,11 +1130,27 @@ app.get("/admin/usage/summary", (req, res) => {
     p.cost = Math.round(p.cost * 1e4) / 1e4;
     for (const m of Object.values(p.models)) m.cost = Math.round(m.cost * 1e6) / 1e6;
   }
-  res.json({ days, totalRequests, totalCost: Math.round(totalCost * 1e4) / 1e4, byProject });
+  const data = { days, totalRequests, totalCost: Math.round(totalCost * 1e4) / 1e4, byProject };
+  summaryCache = { key: cacheKey, data, ts: Date.now() };
+  res.json(data);
+});
+
+// --- Settings API (root only) ---
+app.get("/admin/settings", requireRole("root"), (req, res) => {
+  res.json({ freeTierMode: settings.freeTierMode || "global" });
+});
+
+app.put("/admin/settings", requireRole("root"), (req, res) => {
+  const { freeTierMode } = req.body;
+  if (freeTierMode && ["global", "per-project"].includes(freeTierMode)) {
+    settings.freeTierMode = freeTierMode;
+  }
+  saveSettings(settings);
+  res.json({ success: true, settings: { freeTierMode: settings.freeTierMode || "global" } });
 });
 
 // Update API key at runtime + persist to .env (sanitized)
-app.post("/admin/key", async (req, res) => {
+app.post("/admin/key", requireRole("root"), async (req, res) => {
   const { provider, apiKey, baseUrl } = req.body;
   if (!provider || !apiKey) {
     return res.json({ success: false, error: "provider and apiKey required" });
@@ -892,11 +1203,12 @@ app.post("/admin/key", async (req, res) => {
     const envPath = path.join(__dirname, ".env");
     let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf8") : "";
     const keyName = `${name.toUpperCase()}_API_KEY`;
+    const encKey = encryptValue(safeKey, ADMIN_SECRET);
     const keyRegex = new RegExp(`^${keyName}=.*$`, "m");
     if (keyRegex.test(envContent)) {
-      envContent = envContent.replace(keyRegex, `${keyName}=${safeKey}`);
+      envContent = envContent.replace(keyRegex, `${keyName}=${encKey}`);
     } else {
-      envContent += `\n${keyName}=${safeKey}`;
+      envContent += `\n${keyName}=${encKey}`;
     }
     if (safeUrl) {
       const urlName = `${name.toUpperCase()}_BASE_URL`;
@@ -912,7 +1224,405 @@ app.post("/admin/key", async (req, res) => {
   } catch (e) {
     console.error("Failed to persist .env:", e.message);
   }
+  // Auto-test with cheapest model after key update
+  const cheapest = (MODELS[name] || []).find(m => m.tier === "economy") || (MODELS[name] || [])[0];
+  if (cheapest) {
+    try {
+      const testBody = {
+        model: cheapest.id,
+        messages: [{ role: "user", content: "Say hi in 3 words" }],
+        ...(/^(o\d|gpt-5)/.test(cheapest.id) ? { max_completion_tokens: 30 } : { max_tokens: 20 }),
+      };
+      const headers = { "Content-Type": "application/json" };
+      let url;
+      if (name === "anthropic") {
+        headers["x-api-key"] = safeKey;
+        headers["anthropic-version"] = "2023-06-01";
+        url = `${PROVIDERS[name].baseUrl}/v1/messages`;
+      } else if (name === "gemini") {
+        headers["Authorization"] = `Bearer ${safeKey}`;
+        url = `${PROVIDERS[name].baseUrl}/v1beta/openai/chat/completions`;
+      } else {
+        headers["Authorization"] = `Bearer ${safeKey}`;
+        url = `${PROVIDERS[name].baseUrl}/v1/chat/completions`;
+      }
+      const resp = await fetch(url, { method: "POST", headers, body: JSON.stringify(testBody), signal: AbortSignal.timeout(10000) });
+      const data = await resp.json();
+      if (resp.ok) {
+        const reply = name === "anthropic" ? (data.content?.[0]?.text || "OK") : (data.choices?.[0]?.message?.content || "OK");
+        return res.json({ success: true, message: `${name} key updated`, test: { passed: true, model: cheapest.id, reply: reply.trim() } });
+      } else {
+        return res.json({ success: true, message: `${name} key updated`, test: { passed: false, model: cheapest.id, error: data.error?.message || "API returned error" } });
+      }
+    } catch (e) {
+      return res.json({ success: true, message: `${name} key updated`, test: { passed: false, model: cheapest.id, error: e.message } });
+    }
+  }
   res.json({ success: true, message: `${name} key updated` });
+});
+
+// --- Multi-key API (root only) ---
+app.get("/admin/keys/:provider", requireRole("root"), (req, res) => {
+  const name = req.params.provider.toLowerCase();
+  if (!PROVIDERS[name]) return res.status(404).json({ error: "Unknown provider" });
+  const keys = (providerKeys[name] || []).map(k => ({
+    id: k.id, label: k.label, project: k.project, enabled: k.enabled,
+    keyPreview: (() => { try { const d = decryptValue(k.key, ADMIN_SECRET); return d.slice(0, 6) + '...' + d.slice(-4); } catch { return '***'; } })(),
+  }));
+  res.json(keys);
+});
+
+app.post("/admin/keys/:provider", requireRole("root"), async (req, res) => {
+  const name = req.params.provider.toLowerCase();
+  if (!PROVIDERS[name]) return res.status(404).json({ error: "Unknown provider" });
+  const { label, apiKey, project } = req.body;
+  if (!apiKey || typeof apiKey !== "string") return res.status(400).json({ error: "apiKey required" });
+  if (!label || typeof label !== "string") return res.status(400).json({ error: "label required" });
+  const safeKey = sanitizeEnvValue(apiKey);
+  if (!/^[a-zA-Z0-9_\-\.]+$/.test(safeKey)) return res.status(400).json({ error: "Invalid API key format" });
+  if (project && !projects.find(p => p.name === project)) return res.status(400).json({ error: "Project not found" });
+  if (!providerKeys[name]) providerKeys[name] = [];
+  if (providerKeys[name].length >= 100) return res.status(400).json({ error: "Maximum 100 keys per provider" });
+  const entry = {
+    id: crypto.randomBytes(8).toString('hex'),
+    label: label.slice(0, 32),
+    key: encryptValue(safeKey, ADMIN_SECRET),
+    project: project || null,
+    enabled: true,
+  };
+  providerKeys[name].push(entry);
+  // Keep PROVIDERS.apiKey in sync (first enabled key)
+  try { PROVIDERS[name].apiKey = decryptValue(providerKeys[name].find(k => k.enabled)?.key, ADMIN_SECRET); } catch {}
+  saveKeys(providerKeys);
+  // Auto-test
+  const cheapest = (MODELS[name] || []).find(m => m.tier === "economy") || (MODELS[name] || [])[0];
+  let test = null;
+  if (cheapest) {
+    try {
+      const testBody = { model: cheapest.id, messages: [{ role: "user", content: "Say hi in 3 words" }], ...(/^(o\d|gpt-5)/.test(cheapest.id) ? { max_completion_tokens: 30 } : { max_tokens: 20 }) };
+      const headers = { "Content-Type": "application/json" };
+      let url;
+      if (name === "anthropic") { headers["x-api-key"] = safeKey; headers["anthropic-version"] = "2023-06-01"; url = `${PROVIDERS[name].baseUrl}/v1/messages`; }
+      else if (name === "gemini") { headers["Authorization"] = `Bearer ${safeKey}`; url = `${PROVIDERS[name].baseUrl}/v1beta/openai/chat/completions`; }
+      else { headers["Authorization"] = `Bearer ${safeKey}`; url = `${PROVIDERS[name].baseUrl}/v1/chat/completions`; }
+      const resp = await fetch(url, { method: "POST", headers, body: JSON.stringify(testBody), signal: AbortSignal.timeout(10000) });
+      const data = await resp.json();
+      if (resp.ok) {
+        const reply = name === "anthropic" ? (data.content?.[0]?.text || "OK") : (data.choices?.[0]?.message?.content || "OK");
+        test = { passed: true, model: cheapest.id, reply: reply.trim() };
+      } else {
+        test = { passed: false, model: cheapest.id, error: data.error?.message || "API error" };
+      }
+    } catch (e) { test = { passed: false, error: e.message }; }
+  }
+  res.json({ success: true, id: entry.id, test });
+});
+
+app.put("/admin/keys/:provider/:keyId", requireRole("root"), (req, res) => {
+  const name = req.params.provider.toLowerCase();
+  const keys = providerKeys[name];
+  if (!keys) return res.status(404).json({ error: "Unknown provider" });
+  const entry = keys.find(k => k.id === req.params.keyId);
+  if (!entry) return res.status(404).json({ error: "Key not found" });
+  if (req.body.label) entry.label = String(req.body.label).slice(0, 32);
+  if (req.body.enabled !== undefined) entry.enabled = req.body.enabled === true;
+  if (req.body.project !== undefined) entry.project = req.body.project || null;
+  try { PROVIDERS[name].apiKey = decryptValue(keys.find(k => k.enabled)?.key, ADMIN_SECRET); } catch { PROVIDERS[name].apiKey = undefined; }
+  saveKeys(providerKeys);
+  res.json({ success: true });
+});
+
+app.delete("/admin/keys/:provider/:keyId", requireRole("root"), (req, res) => {
+  const name = req.params.provider.toLowerCase();
+  if (!providerKeys[name]) return res.status(404).json({ error: "Unknown provider" });
+  providerKeys[name] = providerKeys[name].filter(k => k.id !== req.params.keyId);
+  try { PROVIDERS[name].apiKey = decryptValue(providerKeys[name].find(k => k.enabled)?.key, ADMIN_SECRET); } catch { PROVIDERS[name].apiKey = undefined; }
+  saveKeys(providerKeys);
+  res.json({ success: true });
+});
+
+app.put("/admin/keys/:provider/reorder", requireRole("root"), (req, res) => {
+  const name = req.params.provider.toLowerCase();
+  const { order } = req.body; // array of key IDs in new order
+  if (!Array.isArray(order)) return res.status(400).json({ error: "order array required" });
+  const keys = providerKeys[name];
+  if (!keys) return res.status(404).json({ error: "Unknown provider" });
+  const reordered = [];
+  for (const id of order) {
+    const k = keys.find(x => x.id === id);
+    if (k) reordered.push(k);
+  }
+  // Append any keys not in the order array
+  for (const k of keys) { if (!reordered.includes(k)) reordered.push(k); }
+  providerKeys[name] = reordered;
+  saveKeys(providerKeys);
+  res.json({ success: true });
+});
+
+// --- User Management (root and admin only) ---
+app.get("/admin/users", requireRole("root", "admin"), (req, res) => {
+  res.json(users.map(u => ({ username: u.username, role: u.role, enabled: u.enabled, projects: u.projects || [], createdAt: u.createdAt })));
+});
+
+app.post("/admin/users", requireRole("root", "admin"), async (req, res) => {
+  const { username, password, role, projects: linkedProjects } = req.body;
+  if (!username || typeof username !== "string" || !/^[a-zA-Z0-9_]{1,32}$/.test(username)) {
+    return res.json({ success: false, error: "Invalid username (1-32 chars, alphanumeric + underscore)" });
+  }
+  if (!password || password.length < 8) {
+    return res.json({ success: false, error: "Password must be at least 8 characters" });
+  }
+  if (!["admin", "user"].includes(role)) {
+    return res.json({ success: false, error: "Role must be 'admin' or 'user'" });
+  }
+  // H-02: only root can create admin accounts
+  if (role === "admin" && req.userRole !== "root") {
+    return res.status(403).json({ error: "Only root can create admin accounts" });
+  }
+  if (users.find(u => u.username === username)) {
+    return res.json({ success: false, error: "Username already exists" });
+  }
+  const { hash, salt } = await hashPassword(password);
+  const newUser = { username, passwordHash: hash, salt, role, enabled: true, createdAt: new Date().toISOString() };
+  if (role === "user" && Array.isArray(linkedProjects)) {
+    newUser.projects = linkedProjects.filter(p => typeof p === "string");
+  }
+  users.push(newUser);
+  saveUsers(users);
+  res.json({ success: true, user: { username, role, enabled: true, projects: newUser.projects || [], createdAt: newUser.createdAt } });
+});
+
+app.put("/admin/users/:username", requireRole("root", "admin"), async (req, res) => {
+  const user = users.find(u => u.username === req.params.username);
+  if (!user) return res.json({ success: false, error: "User not found" });
+  // Cannot disable/delete your own account
+  if (req.body.enabled === false && user.username === req.userName) {
+    return res.status(400).json({ error: "Cannot disable your own account" });
+  }
+  // Admins cannot modify other admins
+  if (req.userRole === "admin" && user.role === "admin" && user.username !== req.userName) {
+    return res.status(403).json({ error: "Admins cannot modify other admin accounts" });
+  }
+  if (req.body.password && req.body.password.length >= 8) {
+    const { hash, salt } = await hashPassword(req.body.password);
+    user.passwordHash = hash;
+    user.salt = salt;
+  }
+  if (req.body.role && ["admin", "user"].includes(req.body.role)) {
+    // H-02: only root can promote to admin
+    if (req.body.role === "admin" && req.userRole !== "root") {
+      return res.status(403).json({ error: "Only root can assign admin role" });
+    }
+    user.role = req.body.role;
+  }
+  if (req.body.enabled !== undefined) {
+    user.enabled = req.body.enabled;
+    if (!user.enabled) {
+      for (const [k, v] of sessions) {
+        if (v.username === user.username) sessions.delete(k);
+      }
+    }
+  }
+  if (req.body.projects !== undefined) {
+    user.projects = Array.isArray(req.body.projects) ? req.body.projects.filter(p => typeof p === "string") : [];
+  }
+  saveUsers(users);
+  res.json({ success: true, user: { username: user.username, role: user.role, enabled: user.enabled, projects: user.projects || [], createdAt: user.createdAt } });
+});
+
+app.delete("/admin/users/:username", requireRole("root", "admin"), (req, res) => {
+  if (req.params.username === req.userName) {
+    return res.status(400).json({ error: "Cannot delete your own account" });
+  }
+  const idx = users.findIndex(u => u.username === req.params.username);
+  if (idx === -1) return res.json({ success: false, error: "User not found" });
+  if (req.userRole === "admin" && users[idx].role === "admin") {
+    return res.status(403).json({ error: "Admins cannot delete other admin accounts" });
+  }
+  const username = users[idx].username;
+  users.splice(idx, 1);
+  saveUsers(users);
+  for (const [k, v] of sessions) {
+    if (v.username === username) sessions.delete(k);
+  }
+  res.json({ success: true });
+});
+
+// ============================================================
+// Smart Routing — /v1/smart/*
+// ============================================================
+const SMART_CLASSIFIER_TIMEOUT = 2000; // 2s max for classifier
+const SMART_MAX_PREVIEW = 200; // chars of user message sent to classifier
+
+async function classifyRequest(classifierProvider, classifierModel, candidates, userPreview) {
+  const provider = PROVIDERS[classifierProvider];
+  const classKey = selectApiKey(classifierProvider, "_chat");
+  if (!classKey && !provider?.apiKey) return null;
+  const classApiKey = classKey?.apiKey || provider.apiKey;
+
+  const candidateList = candidates.map((c, i) => {
+    const info = getModelInfo(c.provider, c.model);
+    return `${i}: ${c.provider}/${c.model} (${info?.tier || "unknown"}) — ${info?.desc || ""}`;
+  }).join("\n");
+
+  const systemPrompt = `You are a request router. Given a task, pick the best model index.
+Reply ONLY with JSON: {"pick":<index>}
+Models:
+${candidateList}
+Rules: Pick the cheapest model that can handle the task well. Use flagship only for complex reasoning, math proofs, or multi-step coding. Use economy for simple Q&A, translation, classification.`;
+
+  const body = {
+    model: classifierModel,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: `Task: ${userPreview}` }
+    ],
+    temperature: 0,
+    max_tokens: 20,
+  };
+
+  let url = provider.baseUrl;
+  if (classifierProvider === "gemini") url += "/v1beta/openai/chat/completions";
+  else if (classifierProvider === "doubao") url += "/chat/completions";
+  else url += "/v1/chat/completions";
+
+  const headers = { "Content-Type": "application/json" };
+  if (classifierProvider === "anthropic") {
+    // Anthropic uses different format; skip for now — use OpenAI-compat providers
+    return null;
+  }
+  headers["Authorization"] = `Bearer ${classApiKey}`;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SMART_CLASSIFIER_TIMEOUT);
+
+  try {
+    const resp = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const content = data.choices?.[0]?.message?.content || "";
+    // Extract tokens for usage tracking
+    const usage = data.usage || {};
+    const tokens = {
+      input: usage.prompt_tokens || 0,
+      cacheHit: usage.prompt_cache_hit_tokens || 0,
+      output: usage.completion_tokens || 0,
+    };
+    // Parse pick index
+    const match = content.match(/\{\s*"pick"\s*:\s*(\d+)\s*\}/);
+    const pickIdx = match ? parseInt(match[1], 10) : null;
+    return { pickIdx, tokens };
+  } catch {
+    clearTimeout(timer);
+    return null;
+  }
+}
+
+app.use("/v1/smart", apiLimiter, async (req, res, next) => {
+  // --- Auth: same as normal proxy ---
+  let projectName, proj;
+  const projectKey =
+    req.headers["x-project-key"] ||
+    (req.headers["authorization"] || "").replace(/^Bearer\s+/i, "");
+
+  if (safeEqual(projectKey, INTERNAL_CHAT_KEY)) {
+    projectName = "_chat";
+  } else if (["root", "admin"].includes(getSessionRole(req))) {
+    projectName = "_chat";
+  } else {
+    proj = projects.find(p => p.enabled && safeEqual(p.key, projectKey));
+    if (!proj) {
+      return res.status(401).json({ error: "Invalid or missing project key", hint: "Set X-Project-Key header or Bearer token" });
+    }
+    projectName = proj.name;
+    checkBudgetReset(proj);
+    if (proj.maxBudgetUsd != null && (proj.budgetUsedUsd || 0) >= proj.maxBudgetUsd) {
+      return res.status(429).json({ error: "Project budget exceeded" });
+    }
+  }
+
+  // --- Get smart routing config ---
+  const routing = proj?.smartRouting;
+  if (!routing?.enabled || !routing.candidates?.length) {
+    return res.status(400).json({ error: "Smart routing not enabled for this project" });
+  }
+
+  // Validate classifier provider has API key
+  const classifierProv = routing.classifierProvider;
+  const classifierMod = routing.classifierModel;
+  if (!PROVIDERS[classifierProv]?.apiKey) {
+    return res.status(500).json({ error: "Classifier provider has no API key" });
+  }
+
+  // Validate all candidate providers have API keys
+  const validCandidates = routing.candidates.filter(c => PROVIDERS[c.provider]?.apiKey);
+  if (!validCandidates.length) {
+    return res.status(500).json({ error: "No candidate models have configured API keys" });
+  }
+
+  // Extract user message preview (security: limit to SMART_MAX_PREVIEW chars)
+  const messages = req.body?.messages || [];
+  const lastUserMsg = [...messages].reverse().find(m => m.role === "user");
+  const userContent = typeof lastUserMsg?.content === "string"
+    ? lastUserMsg.content
+    : Array.isArray(lastUserMsg?.content)
+      ? lastUserMsg.content.filter(p => p.type === "text").map(p => p.text).join(" ")
+      : "";
+  const preview = userContent.slice(0, SMART_MAX_PREVIEW);
+
+  // --- Classify ---
+  const result = await classifyRequest(classifierProv, classifierMod, validCandidates, preview);
+
+  // Track classifier usage
+  if (result?.tokens) {
+    recordUsage(projectName, classifierProv, classifierMod, result.tokens);
+    if (proj?.maxBudgetUsd != null) {
+      const classifierCost = calcRequestCost(classifierProv, classifierMod, result.tokens);
+      proj.budgetUsedUsd = (proj.budgetUsedUsd || 0) + classifierCost;
+      projectsDirty = true;
+    }
+  }
+
+  // Pick target (fallback if classifier fails or returns invalid index)
+  let target;
+  if (result?.pickIdx != null && result.pickIdx >= 0 && result.pickIdx < validCandidates.length) {
+    target = validCandidates[result.pickIdx];
+  } else {
+    // Fallback: use defaultModel or first candidate
+    target = routing.defaultModel && PROVIDERS[routing.defaultModel.provider]?.apiKey
+      ? routing.defaultModel
+      : validCandidates[0];
+  }
+
+  // --- Rewrite request to target provider/model ---
+  req.params = { provider: target.provider };
+  req.body.model = target.model;
+  req.url = req.url.replace(/^\/v1\/smart/, `/v1/${target.provider}`);
+  req._proxyProjectName = projectName;
+  req._proxyProject = proj;
+
+  // Add routing info header
+  res.setHeader("X-Smart-Route", `${target.provider}/${target.model}`);
+
+  // --- Inject auth and forward to proxy ---
+  const targetProvider = PROVIDERS[target.provider];
+  if (target.provider === "anthropic") {
+    req.headers["x-api-key"] = targetProvider.apiKey;
+    req.headers["anthropic-version"] = req.headers["anthropic-version"] || "2023-06-01";
+    delete req.headers["authorization"];
+  } else {
+    req.headers["authorization"] = `Bearer ${targetProvider.apiKey}`;
+  }
+  delete req.headers["host"];
+  delete req.headers["x-project-key"];
+
+  proxyMiddleware(req, res, next);
 });
 
 // ============================================================
@@ -942,6 +1652,11 @@ const proxyMiddleware = createProxyMiddleware({
   on: {
     proxyReq: (proxyReq, req) => {
       if (req.body && ["POST", "PUT", "PATCH"].includes(req.method)) {
+        // Inject stream_options for accurate SSE usage tracking (OpenAI-compatible providers)
+        const provName = req.params?.provider?.toLowerCase();
+        if (req.body.stream === true && provName !== "anthropic") {
+          req.body.stream_options = { ...(req.body.stream_options || {}), include_usage: true };
+        }
         const bodyData = JSON.stringify(req.body);
         proxyReq.setHeader("Content-Type", "application/json");
         proxyReq.setHeader("Content-Length", Buffer.byteLength(bodyData));
@@ -1001,8 +1716,8 @@ app.use("/v1/:provider", apiLimiter, (req, res, next) => {
   if (safeEqual(projectKey, INTERNAL_CHAT_KEY)) {
     // Server-internal chat key (never exposed to browser)
     projectName = "_chat";
-  } else if (hasAdminSession(req)) {
-    // F-02: Admin session cookie (from /chat page)
+  } else if (["root", "admin"].includes(getSessionRole(req))) {
+    // H-01 fix: only root/admin sessions bypass project policy
     projectName = "_chat";
   } else {
     // F-01: Always enforce project-key validation (removed projects.length bypass)
@@ -1039,9 +1754,12 @@ app.use("/v1/:provider", apiLimiter, (req, res, next) => {
   if (!provider) {
     return res.status(404).json({ error: "Unknown provider" });
   }
-  if (!provider.apiKey) {
+  // Select API key: project-specific first, then public
+  const selectedKey = selectApiKey(providerName, projectName);
+  if (!selectedKey && !provider.apiKey) {
     return res.status(403).json({ error: "Provider has no API key configured" });
   }
+  const proxyApiKey = selectedKey?.apiKey || provider.apiKey;
 
   // F-04: Validate upstream path against allowlist (O-02: normalize like pathRewrite)
   let incomingSubpath = req.path.replace(new RegExp(`^/v1/${providerName}`, "i"), "");
@@ -1060,11 +1778,11 @@ app.use("/v1/:provider", apiLimiter, (req, res, next) => {
 
   // Inject auth — replace any client-sent auth
   if (providerName === "anthropic") {
-    req.headers["x-api-key"] = provider.apiKey;
+    req.headers["x-api-key"] = proxyApiKey;
     req.headers["anthropic-version"] = req.headers["anthropic-version"] || "2023-06-01";
     delete req.headers["authorization"];
   } else {
-    req.headers["authorization"] = `Bearer ${provider.apiKey}`;
+    req.headers["authorization"] = `Bearer ${proxyApiKey}`;
   }
   delete req.headers["host"];
   delete req.headers["x-project-key"];
@@ -1076,7 +1794,8 @@ app.use("/v1/:provider", apiLimiter, (req, res, next) => {
 app.use((err, req, res, next) => {
   const status = err.status || err.statusCode || 500;
   console.error(`[${req.method} ${req.path}] ${err.message}`);
-  res.status(status).json({ error: status === 400 ? "Bad request" : "Internal server error" });
+  const msg = status === 400 ? "Bad request" : status === 413 ? "Payload too large" : "Internal server error";
+  res.status(status).json({ error: msg });
 });
 
 // ============================================================
@@ -1084,9 +1803,9 @@ app.use((err, req, res, next) => {
 // ============================================================
 const server = app.listen(PORT, "0.0.0.0", () => {
   const available = Object.entries(PROVIDERS)
-    .filter(([, cfg]) => cfg.apiKey)
+    .filter(([name]) => (providerKeys[name] || []).some(k => k.enabled))
     .map(([name]) => name);
-  console.log(`AI API Gateway running on port ${PORT}`);
+  console.log(`LumiGate running on port ${PORT}`);
   console.log(`Available providers: ${available.join(", ")}`);
   console.log(`Admin auth: ${process.env.ADMIN_SECRET ? "configured" : "temporary (set ADMIN_SECRET in .env)"}`);
 });
