@@ -9,7 +9,6 @@ Designed to run on a NAS, mini PC, or any edge device where every megabyte count
 ## Table of Contents
 
 - [Quick Start](#quick-start)
-- [CLI (`lg`)](#cli-lg)
 - [Architecture](#architecture)
 - [Modular Design](#modular-design)
 - [Features](#features)
@@ -17,6 +16,7 @@ Designed to run on a NAS, mini PC, or any edge device where every megabyte count
 - [API Reference](#api-reference)
 - [Security](#security)
 - [Performance](#performance)
+- [CLI (`lg`)](#cli-lg)
 - [Project Structure](#project-structure)
 - [Contributing](#contributing)
 
@@ -54,59 +54,6 @@ For production, use `docker-compose.yml` and mount persistent `data/`.
 - Stable tags: `vX.Y.Z`
 - Rolling tag: `latest`
 - Release notes: see GitHub Releases page for upgrade and compatibility notes
-
-## CLI (`lg`)
-
-LumiGate ships with a full-featured CLI. Install it:
-
-```bash
-sudo ln -sf "$(pwd)/cli.sh" /usr/local/bin/lg
-```
-
-Just type `lg` to see live status and quick commands:
-
-```
-lg v1.0.0 — LumiGate CLI
-
-  ● Online  │  enterprise  │  2d 5h 30m  │  openai, gemini, deepseek
-
-  lg status          Health & providers
-  lg config          View/edit config
-  lg start           Start containers
-  lg restart         Rebuild & restart
-  lg logs            Tail logs
-  lg projects        Manage projects
-  lg usage           Cost & usage
-  lg help            All commands
-```
-
-### All Commands
-
-| Category | Command | Description |
-|----------|---------|-------------|
-| **Lifecycle** | `lg setup` | Interactive setup wizard |
-| | `lg start` | Start all containers |
-| | `lg stop / restart / down` | Stop / rebuild+restart / tear down |
-| | `lg update` | Pull latest code + rebuild |
-| | `lg logs [service]` | Tail container logs |
-| | `lg ps` | Show container status |
-| **Config** | `lg config` | Show current config |
-| | `lg config set <KEY> <val>` | Set any config (API keys, mode, port, etc.) |
-| | `lg config env` | Edit .env file directly |
-| | `lg mode [lite\|enterprise\|custom]` | View/switch deploy mode |
-| **Gateway** | `lg status` | Health, uptime, providers, watchdog |
-| | `lg providers` | List all providers with status |
-| | `lg test <provider> [model]` | Test provider connectivity |
-| | `lg models <provider>` | List models with pricing |
-| | `lg key <provider> <key>` | Update provider API key |
-| **Projects** | `lg projects` | List projects |
-| | `lg projects add <name>` | Create project + get API key |
-| | `lg projects del <name>` | Delete project |
-| | `lg usage [days]` | Usage & cost summary |
-| **Operations** | `lg backup [create\|list]` | Manage backups |
-| | `lg backup restore <name>` | Restore from backup |
-| | `lg watchdog start\|stop\|log` | Auto-recovery daemon |
-| | `lg install` | Symlink `lg` to /usr/local/bin |
 
 ## Architecture
 
@@ -296,6 +243,59 @@ curl -X POST https://lumigate.autorums.com/v1/openai/v1/chat/completions \
 | App (Node.js) | ~18 MiB |
 | Nginx | ~10 MiB |
 | **Total** | **~28 MiB** |
+
+## CLI (`lg`)
+
+LumiGate ships with a full-featured CLI. Install it:
+
+```bash
+sudo ln -sf "$(pwd)/cli.sh" /usr/local/bin/lg
+```
+
+Just type `lg` to see live status and quick commands:
+
+```
+lg v1.0.0 — LumiGate CLI
+
+  ● Online  │  enterprise  │  2d 5h 30m  │  openai, gemini, deepseek
+
+  lg status          Health & providers
+  lg config          View/edit config
+  lg start           Start containers
+  lg restart         Rebuild & restart
+  lg logs            Tail logs
+  lg projects        Manage projects
+  lg usage           Cost & usage
+  lg help            All commands
+```
+
+### All Commands
+
+| Category | Command | Description |
+|----------|---------|-------------|
+| **Lifecycle** | `lg setup` | Interactive setup wizard |
+| | `lg start` | Start all containers |
+| | `lg stop / restart / down` | Stop / rebuild+restart / tear down |
+| | `lg update` | Pull latest code + rebuild |
+| | `lg logs [service]` | Tail container logs |
+| | `lg ps` | Show container status |
+| **Config** | `lg config` | Show current config |
+| | `lg config set <KEY> <val>` | Set any config (API keys, mode, port, etc.) |
+| | `lg config env` | Edit .env file directly |
+| | `lg mode [lite\|enterprise\|custom]` | View/switch deploy mode |
+| **Gateway** | `lg status` | Health, uptime, providers, watchdog |
+| | `lg providers` | List all providers with status |
+| | `lg test <provider> [model]` | Test provider connectivity |
+| | `lg models <provider>` | List models with pricing |
+| | `lg key <provider> <key>` | Update provider API key |
+| **Projects** | `lg projects` | List projects |
+| | `lg projects add <name>` | Create project + get API key |
+| | `lg projects del <name>` | Delete project |
+| | `lg usage [days]` | Usage & cost summary |
+| **Operations** | `lg backup [create\|list]` | Manage backups |
+| | `lg backup restore <name>` | Restore from backup |
+| | `lg watchdog start\|stop\|log` | Auto-recovery daemon |
+| | `lg install` | Symlink `lg` to /usr/local/bin |
 
 ## Project Structure
 
