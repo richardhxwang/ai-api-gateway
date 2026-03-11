@@ -855,9 +855,11 @@ const MODELS = {
   openai: [
     { id: "gpt-4.1-nano", tier: "economy", price: { in: 0.10, cacheIn: 0.025, out: 0.40 }, caps: ["text"], desc: "Classification, extraction, routing — lowest cost, 1M context" },
     { id: "gpt-4.1-mini", tier: "economy", price: { in: 0.40, cacheIn: 0.10, out: 1.60 }, caps: ["text", "image"], desc: "Summarization, simple code gen, 1M context, vision" },
+    { id: "gpt-4o-mini-audio-preview", tier: "economy", price: { in: 0.15, cacheIn: 0.075, out: 0.60 }, caps: ["text", "audio"], desc: "Audio input/output preview — voice transcription, speech tasks (audio: $10/M in, $20/M out)" },
     { id: "o3-mini", tier: "economy", price: { in: 1.10, cacheIn: 0.55, out: 4.40 }, caps: ["text"], desc: "Code gen, math reasoning — best value reasoning model" },
     { id: "gpt-5-mini", tier: "standard", price: { in: 0.25, cacheIn: 0.025, out: 2.00 }, caps: ["text", "image"], desc: "GPT-5 lite — everyday coding, writing, analysis" },
     { id: "gpt-4.1", tier: "standard", price: { in: 2.00, cacheIn: 0.50, out: 8.00 }, caps: ["text", "image"], desc: "Instruction following, long docs, function calling, 1M context" },
+    { id: "gpt-4o-audio-preview", tier: "standard", price: { in: 2.50, cacheIn: 1.25, out: 10.00 }, caps: ["text", "audio"], desc: "Audio input/output preview — high-accuracy voice understanding (audio: $100/M in, $200/M out)" },
     { id: "o4-mini", tier: "standard", price: { in: 1.10, cacheIn: 0.275, out: 4.40 }, caps: ["text", "image"], desc: "Multi-step tool orchestration, code execution, vision" },
     { id: "o3", tier: "flagship", price: { in: 2.00, cacheIn: 0.50, out: 8.00 }, caps: ["text", "image"], desc: "PhD-level science reasoning, competitive programming, 200K context" },
     { id: "gpt-5", tier: "flagship", price: { in: 0.625, cacheIn: 0.0625, out: 5.00 }, caps: ["text", "image", "audio", "video"], desc: "Native multimodal flagship — image/audio/video input" },
