@@ -213,11 +213,26 @@ curl -X POST https://lumigate.autorums.com/v1/openai/v1/chat/completions \
 
 ### Stress Tests (External — Cloudflare Named Tunnel, QUIC)
 
-| Scenario | Requests | Concurrency | Median | p95 | p99 |
-|----------|----------|-------------|--------|-----|-----|
-| Health | 200 | 20 | 207ms | 5,182ms | 11,307ms |
+| Scenario | Requests | Concurrency | QPS | p50 | p99 | Success |
+|----------|----------|-------------|-----|-----|-----|---------|
+| Heavy | 1,000 | 50 | 337 | 132ms | 351ms | 98.6% |
+| Extreme | 2,000 | 100 | 468 | 184ms | 434ms | 99.95% |
+| Burst | 5,000 | 200 | 484 | 369ms | 718ms | 99.98% |
+| Sustained 30s | 11,762 | 100 | 388 | 245ms | 569ms | 99.99% |
+| **EXTREME** | **10,000** | **500** | **476** | **1,035ms** | **1,836ms** | **99.94%** |
 
-> External latency includes TLS handshake + Cloudflare edge routing (SIN). Production clients with connection reuse see significantly lower latency.
+> Tested via Cloudflare QUIC tunnel to SIN edge. All failures are client-side TLS EOF, not server errors.
+
+### Penetration Tests (20/20 passed)
+
+| Category | Tests | Result |
+|----------|-------|--------|
+| Auth bypass (no login, fake cookie, fake token) | 6 | All blocked (401) |
+| Injection (path traversal, XSS, NoSQL, CRLF, null byte) | 6 | All blocked |
+| Rate limiting (login brute force, proxy flood) | 3 | 429 triggered correctly |
+| Protocol (oversized payload, method tampering, host injection, open redirect) | 5 | All blocked (403/404) |
+
+> Double-layer protection: app-level auth + rate limiting + Cloudflare WAF. See [full report](reviews/review-report-v6-external.md).
 
 ### Chaos & Fault Injection
 
