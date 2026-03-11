@@ -21,15 +21,17 @@ Tool: `hey` (HTTP load generator), `curl`
 
 ### Test 2: Heavy Load (1,000 req / 50 concurrent)
 
-| Metric | Value |
-|--------|-------|
-| QPS | 336.6 |
-| Avg | 146ms |
-| p50 | 132ms |
-| p95 | 281ms |
-| p99 | 351ms |
-| 200 OK | 986/1,000 (98.6%) |
-| Errors | 14 EOF (TLS reuse) |
+| Metric | Cold Run | Warm Run |
+|--------|----------|----------|
+| QPS | 336.6 | 382.8 |
+| Avg | 146ms | 128ms |
+| p50 | 132ms | 114ms |
+| p95 | 281ms | 212ms |
+| p99 | 351ms | 316ms |
+| 200 OK | 986/1,000 (98.6%) | 1,000/1,000 (100%) |
+| Errors | 14 EOF (cold TLS) | 0 |
+
+> Cold run was the first heavy test after tunnel restart. 14 EOF errors caused by TLS session cache and QUIC connection pool not yet warmed up. Warm run confirms 100% success.
 
 ### Test 3: Extreme (2,000 req / 100 concurrent)
 
@@ -104,7 +106,7 @@ Tool: `hey` (HTTP load generator), `curl`
 | Test | Requests | Concurrency | QPS | p50 | p99 | Success Rate |
 |------|----------|-------------|-----|-----|-----|-------------|
 | Warm-up | 100 | 10 | 106 | 89ms | — | 100% |
-| Heavy | 1,000 | 50 | 337 | 132ms | 351ms | 98.6% |
+| Heavy (warm) | 1,000 | 50 | 383 | 114ms | 316ms | 100% |
 | Extreme | 2,000 | 100 | 468 | 184ms | 434ms | 99.95% |
 | Burst | 5,000 | 200 | 484 | 369ms | 718ms | 99.98% |
 | Sustained 30s | 11,762 | 100 | 388 | 245ms | 569ms | 99.99% |

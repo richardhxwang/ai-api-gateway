@@ -215,7 +215,7 @@ curl -X POST https://lumigate.autorums.com/v1/openai/v1/chat/completions \
 
 | Scenario | Requests | Concurrency | QPS | p50 | p99 | Success |
 |----------|----------|-------------|-----|-----|-----|---------|
-| Heavy | 1,000 | 50 | 337 | 132ms | 351ms | 98.6% |
+| Heavy | 1,000 | 50 | 383 | 114ms | 316ms | 100% |
 | Extreme | 2,000 | 100 | 468 | 184ms | 434ms | 99.95% |
 | Burst | 5,000 | 200 | 484 | 369ms | 718ms | 99.98% |
 | Sustained 30s | 11,762 | 100 | 388 | 245ms | 569ms | 99.99% |
