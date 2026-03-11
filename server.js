@@ -163,20 +163,78 @@ function normalizeIP(req) {
   return ip;
 }
 
-// Per-project rate limiter (in-memory sliding window, 1-min buckets)
+// Per-project rate limiter (in-memory, 1-min buckets)
+// Two tiers: project-wide total RPM + per-IP RPM within project
 const projectRateBuckets = new Map(); // projectName -> { count, resetAt }
-function checkProjectRateLimit(proj) {
-  if (!proj.maxRpm) return true; // no limit configured
+const projectIpRateBuckets = new Map(); // "projectName:ip" -> { count, resetAt }
+function checkProjectRateLimit(proj, req) {
   const now = Date.now();
-  let bucket = projectRateBuckets.get(proj.name);
+  // Tier 1: Per-IP within project (maxRpmPerIp)
+  if (proj.maxRpmPerIp && req) {
+    const ip = normalizeIP(req);
+    const ipKey = `${proj.name}:${ip}`;
+    let ipBucket = projectIpRateBuckets.get(ipKey);
+    if (!ipBucket || now >= ipBucket.resetAt) {
+      ipBucket = { count: 0, resetAt: now + 60000 };
+      projectIpRateBuckets.set(ipKey, ipBucket);
+    }
+    ipBucket.count++;
+    if (ipBucket.count > proj.maxRpmPerIp) return { ok: false, reason: "ip" };
+  }
+  // Tier 2: Project-wide total RPM (maxRpm)
+  if (proj.maxRpm) {
+    let bucket = projectRateBuckets.get(proj.name);
+    if (!bucket || now >= bucket.resetAt) {
+      bucket = { count: 0, resetAt: now + 60000 };
+      projectRateBuckets.set(proj.name, bucket);
+    }
+    bucket.count++;
+    if (bucket.count > proj.maxRpm) return { ok: false, reason: "project" };
+  }
+  return { ok: true };
+}
+// Per-token rate limiting — each ephemeral token has its own RPM bucket
+const tokenRateBuckets = new Map(); // tokenStr -> { count, resetAt }
+function checkTokenRateLimit(tokenStr, proj) {
+  const limit = proj.maxRpmPerToken || proj.maxRpmPerIp; // fallback to per-IP limit
+  if (!limit) return { ok: true };
+  const now = Date.now();
+  let bucket = tokenRateBuckets.get(tokenStr);
   if (!bucket || now >= bucket.resetAt) {
     bucket = { count: 0, resetAt: now + 60000 };
-    projectRateBuckets.set(proj.name, bucket);
+    tokenRateBuckets.set(tokenStr, bucket);
   }
   bucket.count++;
-  if (bucket.count > proj.maxRpm) return false;
-  return true;
+  if (bucket.count > limit) return { ok: false, reason: "token" };
+  return { ok: true };
 }
+
+// Cost-based rate limiting — cap USD spend per minute per project
+const projectCostBuckets = new Map(); // projectName -> { cost, resetAt }
+function checkCostRateLimit(proj) {
+  if (!proj.maxCostPerMin) return { ok: true };
+  const now = Date.now();
+  let bucket = projectCostBuckets.get(proj.name);
+  if (!bucket || now >= bucket.resetAt) {
+    bucket = { cost: 0, resetAt: now + 60000 };
+    projectCostBuckets.set(proj.name, bucket);
+  }
+  // Check before the request (pre-flight) — block if already over limit
+  if (bucket.cost >= proj.maxCostPerMin) return { ok: false, reason: "cost" };
+  return { ok: true };
+}
+function recordCostForRateLimit(projName, cost) {
+  const bucket = projectCostBuckets.get(projName);
+  if (bucket) bucket.cost += cost;
+}
+
+// Cleanup stale buckets every 5 min
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of projectIpRateBuckets) { if (now >= v.resetAt) projectIpRateBuckets.delete(k); }
+  for (const [k, v] of tokenRateBuckets) { if (now >= v.resetAt) tokenRateBuckets.delete(k); }
+  for (const [k, v] of projectCostBuckets) { if (now >= v.resetAt) projectCostBuckets.delete(k); }
+}, 300000);
 
 // Per-project anomaly detection — auto-suspend on request spike
 const projectMinuteHistory = new Map(); // projectName -> [count_per_minute, ...]
@@ -253,12 +311,13 @@ function verifyHmacSignature(proj, req) {
   }
   // Nonce check (prevent replay within window)
   if (usedNonces.has(nonce)) return { ok: false, error: "Duplicate nonce (replay detected)" };
-  usedNonces.set(nonce, Date.now() + HMAC_WINDOW_SEC * 1000);
   // Compute expected signature: HMAC-SHA256(projectKey, timestamp + nonce + body)
   const bodyStr = req._rawBody || JSON.stringify(req.body || {});
   const payload = ts + nonce + bodyStr;
   const expected = crypto.createHmac("sha256", proj.key).update(payload).digest("hex");
   if (!safeEqual(sig, expected)) return { ok: false, error: "Invalid signature" };
+  // Only mark nonce used after successful verification
+  usedNonces.set(nonce, Date.now() + HMAC_WINDOW_SEC * 1000);
   return { ok: true };
 }
 
@@ -293,7 +352,7 @@ const PROVIDER_HOST_ALLOWLIST = new Set([
 // F-04: Allowed upstream paths per provider (prefix match)
 const ALLOWED_UPSTREAM_PATHS = {
   openai:     ["/v1/chat/completions", "/v1/embeddings", "/v1/audio/", "/v1/images/", "/v1/models"],
-  anthropic:  ["/v1/messages"],
+  anthropic:  ["/v1/messages", "/v1/chat/completions"],
   gemini:     ["/v1beta/openai/chat/completions", "/v1beta/openai/embeddings"],
   deepseek:   ["/v1/chat/completions"],
   kimi:       ["/v1/chat/completions"],
@@ -1037,6 +1096,7 @@ app.get("/", (req, res) => {
 
 // F-02: Serve chat — requires root/admin session (no key exposed to browser)
 app.get("/chat", (req, res) => {
+  if (!mod("chat")) return res.redirect("/");
   const role = getSessionRole(req);
   if (!role || role === "user") return res.redirect("/");
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
@@ -1135,7 +1195,8 @@ app.get("/admin/uptime", (req, res) => {
 app.get("/admin/test/:provider", requireRole("root", "admin"), async (req, res) => {
   const name = req.params.provider.toLowerCase();
   const provider = PROVIDERS[name];
-  if (!provider || !provider.apiKey) {
+  const testKey = selectApiKey(name, null)?.apiKey || provider?.apiKey;
+  if (!provider || !testKey) {
     return res.json({ success: false, error: `Provider '${name}' not available` });
   }
   const start = Date.now();
@@ -1151,14 +1212,14 @@ app.get("/admin/test/:provider", requireRole("root", "admin"), async (req, res) 
     const headers = { "Content-Type": "application/json" };
     let url;
     if (name === "anthropic") {
-      headers["x-api-key"] = provider.apiKey;
+      headers["x-api-key"] = testKey;
       headers["anthropic-version"] = "2023-06-01";
       url = `${provider.baseUrl}/v1/messages`;
     } else if (name === "gemini") {
-      headers["Authorization"] = `Bearer ${provider.apiKey}`;
+      headers["Authorization"] = `Bearer ${testKey}`;
       url = `${provider.baseUrl}/v1beta/openai/chat/completions`;
     } else {
-      headers["Authorization"] = `Bearer ${provider.apiKey}`;
+      headers["Authorization"] = `Bearer ${testKey}`;
       url = `${provider.baseUrl}/v1/chat/completions`;
     }
     const resp = await fetch(url, { method: "POST", headers, body: JSON.stringify(testBody) });
@@ -1203,7 +1264,7 @@ app.post("/admin/projects", requireRole("root", "admin"), (req, res) => {
     return res.json({ success: false, error: "project already exists" });
   }
   const key = "pk_" + crypto.randomBytes(24).toString("hex");
-  const project = { name, key, enabled: true, authMode: "hmac", createdAt: new Date().toISOString() };
+  const project = { name, key, enabled: true, authMode: "hmac", maxRpm: 600, maxRpmPerIp: 30, maxRpmPerToken: 30, maxCostPerMin: 0.5, anomalyAutoSuspend: true, createdAt: new Date().toISOString() };
   // Phase 1a: Budget enforcement
   if (maxBudgetUsd != null && maxBudgetUsd > 0) {
     project.maxBudgetUsd = Number(maxBudgetUsd);
@@ -1217,6 +1278,9 @@ app.post("/admin/projects", requireRole("root", "admin"), (req, res) => {
   }
   // Per-project rate limit
   if (maxRpm != null && maxRpm > 0) project.maxRpm = Math.min(Number(maxRpm), 10000);
+  if (req.body.maxRpmPerIp != null && req.body.maxRpmPerIp > 0) project.maxRpmPerIp = Math.min(Number(req.body.maxRpmPerIp), 1000);
+  if (req.body.maxRpmPerToken != null && req.body.maxRpmPerToken > 0) project.maxRpmPerToken = Math.min(Number(req.body.maxRpmPerToken), 1000);
+  if (req.body.maxCostPerMin != null && req.body.maxCostPerMin > 0) project.maxCostPerMin = Number(req.body.maxCostPerMin);
   // IP allowlist
   if (Array.isArray(allowedIPs) && allowedIPs.length > 0) {
     project.allowedIPs = allowedIPs.filter(ip => typeof ip === "string" && ip.length > 0).slice(0, 50);
@@ -1279,6 +1343,18 @@ app.put("/admin/projects/:name", requireRole("root", "admin"), (req, res) => {
   if (req.body.maxRpm !== undefined) {
     if (req.body.maxRpm === null || req.body.maxRpm === 0) delete proj.maxRpm;
     else proj.maxRpm = Math.min(Number(req.body.maxRpm), 10000);
+  }
+  if (req.body.maxRpmPerIp !== undefined) {
+    if (req.body.maxRpmPerIp === null || req.body.maxRpmPerIp === 0) delete proj.maxRpmPerIp;
+    else proj.maxRpmPerIp = Math.min(Number(req.body.maxRpmPerIp), 1000);
+  }
+  if (req.body.maxRpmPerToken !== undefined) {
+    if (req.body.maxRpmPerToken === null || req.body.maxRpmPerToken === 0) delete proj.maxRpmPerToken;
+    else proj.maxRpmPerToken = Math.min(Number(req.body.maxRpmPerToken), 1000);
+  }
+  if (req.body.maxCostPerMin !== undefined) {
+    if (req.body.maxCostPerMin === null || req.body.maxCostPerMin === 0) delete proj.maxCostPerMin;
+    else proj.maxCostPerMin = Number(req.body.maxCostPerMin);
   }
   // IP allowlist
   if (req.body.allowedIPs !== undefined) {
@@ -2079,11 +2155,13 @@ app.use("/v1/smart", apiLimiter, async (req, res, next) => {
     projectName = "_chat";
   } else {
     // Resolve: ephemeral token → HMAC → direct key
+    let _tokenStr = null;
     if (projectKey.startsWith("et_")) {
       const tokenInfo = ephemeralTokens.get(projectKey);
       if (!tokenInfo || Date.now() > tokenInfo.expiresAt) return res.status(401).json({ error: "Token expired or invalid" });
       proj = tokenInfo.project;
       if (!proj.enabled) return res.status(403).json({ error: "Project disabled" });
+      _tokenStr = projectKey;
     } else if (req.headers["x-signature"]) {
       const projId = req.headers["x-project-id"];
       if (projId) {
@@ -2098,7 +2176,9 @@ app.use("/v1/smart", apiLimiter, async (req, res, next) => {
     }
     projectName = proj.name;
     if (!checkProjectIP(proj, req)) return res.status(403).json({ error: "IP not allowed for this project" });
-    if (!checkProjectRateLimit(proj)) return res.status(429).json({ error: "Project rate limit exceeded" });
+    { const rl = checkProjectRateLimit(proj, req); if (!rl.ok) return res.status(429).json({ error: rl.reason === "ip" ? "Per-IP rate limit exceeded for this project" : "Project rate limit exceeded" }); }
+    if (_tokenStr) { const trl = checkTokenRateLimit(_tokenStr, proj); if (!trl.ok) return res.status(429).json({ error: "Per-token rate limit exceeded" }); }
+    { const crl = checkCostRateLimit(proj); if (!crl.ok) return res.status(429).json({ error: "Project cost rate limit exceeded (USD/min)" }); }
     if (!checkProjectAnomaly(proj)) return res.status(403).json({ error: "Project suspended due to anomalous activity" });
     checkBudgetReset(proj);
     if (proj.maxBudgetUsd != null && (proj.budgetUsedUsd || 0) >= proj.maxBudgetUsd) {
@@ -2141,11 +2221,12 @@ app.use("/v1/smart", apiLimiter, async (req, res, next) => {
   // Track classifier usage
   if (result?.tokens) {
     recordUsage(projectName, classifierProv, classifierMod, result.tokens);
+    const classifierCost = calcRequestCost(classifierProv, classifierMod, result.tokens);
     if (proj?.maxBudgetUsd != null) {
-      const classifierCost = calcRequestCost(classifierProv, classifierMod, result.tokens);
       proj.budgetUsedUsd = (proj.budgetUsedUsd || 0) + classifierCost;
       markProjectsDirty();
     }
+    if (proj?.maxCostPerMin) recordCostForRateLimit(projectName, classifierCost);
   }
 
   // Pick target (fallback if classifier fails or returns invalid index)
@@ -2183,6 +2264,124 @@ app.use("/v1/smart", apiLimiter, async (req, res, next) => {
 
   proxyMiddleware(req, res, next);
 });
+
+// ============================================================
+// Anthropic OpenAI Compatibility Layer
+// Translates /v1/chat/completions ↔ /v1/messages format
+// ============================================================
+function openaiToAnthropicBody(body) {
+  const msgs = body.messages || [];
+  const systemParts = msgs
+    .filter(m => m.role === "system")
+    .map(m => (typeof m.content === "string" ? m.content : (m.content || []).filter(p => p.type === "text").map(p => p.text).join("")));
+  const nonSystem = msgs
+    .filter(m => m.role !== "system")
+    .map(m => ({ role: m.role, content: m.content }));
+  const out = { model: body.model, messages: nonSystem, max_tokens: body.max_tokens || 1024 };
+  if (systemParts.length) out.system = systemParts.join("\n");
+  if (body.temperature != null) out.temperature = body.temperature;
+  if (body.top_p != null) out.top_p = body.top_p;
+  if (body.stop) out.stop_sequences = Array.isArray(body.stop) ? body.stop : [body.stop];
+  if (body.stream) out.stream = true;
+  return out;
+}
+
+function anthropicToOpenaiResponse(data, model) {
+  const text = (data.content || []).filter(c => c.type === "text").map(c => c.text).join("");
+  const finishReason = { end_turn: "stop", max_tokens: "length" }[data.stop_reason] || data.stop_reason || "stop";
+  return {
+    id: data.id || ("chatcmpl-anth-" + Date.now()),
+    object: "chat.completion",
+    created: Math.floor(Date.now() / 1000),
+    model,
+    choices: [{ index: 0, message: { role: "assistant", content: text }, finish_reason: finishReason, logprobs: null }],
+    usage: {
+      prompt_tokens: data.usage?.input_tokens || 0,
+      completion_tokens: data.usage?.output_tokens || 0,
+      total_tokens: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0),
+    },
+  };
+}
+
+async function handleAnthropicCompat(req, res, apiKey) {
+  const requestedModel = req.body?.model || "claude-haiku-4-5-20251001";
+  const isStream = req.body?.stream === true;
+  const anthropicBody = openaiToAnthropicBody(req.body);
+  const fetchHeaders = { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" };
+
+  let anthropicResp;
+  try {
+    anthropicResp = await fetch(`${PROVIDERS.anthropic.baseUrl}/v1/messages`, {
+      method: "POST", headers: fetchHeaders, body: JSON.stringify(anthropicBody),
+    });
+  } catch (e) {
+    return res.status(502).json({ error: "Upstream connection error", message: e.message });
+  }
+
+  if (!anthropicResp.ok) {
+    const errText = await anthropicResp.text();
+    let errMsg = errText;
+    try { errMsg = JSON.parse(errText)?.error?.message || errText; } catch (_) {}
+    return res.status(anthropicResp.status).json({ error: errMsg });
+  }
+
+  if (isStream) {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("X-Accel-Buffering", "no");
+    const msgId = "chatcmpl-anth-" + Date.now();
+    const created = Math.floor(Date.now() / 1000);
+    let inputTokens = 0, outputTokens = 0, buf = "";
+    try {
+      for await (const chunk of anthropicResp.body) {
+        buf += Buffer.from(chunk).toString();
+        const lines = buf.split("\n");
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const data = line.slice(6).trim();
+          if (!data) continue;
+          try {
+            const ev = JSON.parse(data);
+            if (ev.type === "message_start") {
+              inputTokens = ev.message?.usage?.input_tokens || 0;
+              res.write(`data: ${JSON.stringify({ id: msgId, object: "chat.completion.chunk", created, model: requestedModel, choices: [{ index: 0, delta: { role: "assistant", content: "" }, logprobs: null, finish_reason: null }] })}\n\n`);
+            } else if (ev.type === "content_block_delta" && ev.delta?.type === "text_delta") {
+              res.write(`data: ${JSON.stringify({ id: msgId, object: "chat.completion.chunk", created, model: requestedModel, choices: [{ index: 0, delta: { content: ev.delta.text }, logprobs: null, finish_reason: null }] })}\n\n`);
+            } else if (ev.type === "message_delta") {
+              outputTokens = ev.usage?.output_tokens || 0;
+              const fr = { end_turn: "stop", max_tokens: "length" }[ev.delta?.stop_reason] || ev.delta?.stop_reason || "stop";
+              res.write(`data: ${JSON.stringify({ id: msgId, object: "chat.completion.chunk", created, model: requestedModel, choices: [{ index: 0, delta: {}, logprobs: null, finish_reason: fr }], usage: { prompt_tokens: inputTokens, completion_tokens: outputTokens, total_tokens: inputTokens + outputTokens } })}\n\n`);
+            } else if (ev.type === "message_stop") {
+              res.write("data: [DONE]\n\n");
+            }
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
+    res.end();
+    const tokens = { input: inputTokens, cacheHit: 0, output: outputTokens };
+    recordUsage(req._proxyProjectName, "anthropic", requestedModel, tokens);
+    if (req._proxyProject) {
+      const cost = calcRequestCost("anthropic", requestedModel, tokens);
+      if (req._proxyProject.maxBudgetUsd != null) { req._proxyProject.budgetUsedUsd = (req._proxyProject.budgetUsedUsd || 0) + cost; markProjectsDirty(); }
+      if (req._proxyProject.maxCostPerMin) recordCostForRateLimit(req._proxyProjectName, cost);
+    }
+    return;
+  }
+
+  // Non-streaming
+  const anthropicData = await anthropicResp.json();
+  const openaiData = anthropicToOpenaiResponse(anthropicData, requestedModel);
+  const tokens = { input: anthropicData.usage?.input_tokens || 0, cacheHit: 0, output: anthropicData.usage?.output_tokens || 0 };
+  recordUsage(req._proxyProjectName, "anthropic", requestedModel, tokens);
+  if (req._proxyProject) {
+    const cost = calcRequestCost("anthropic", requestedModel, tokens);
+    if (req._proxyProject.maxBudgetUsd != null) { req._proxyProject.budgetUsedUsd = (req._proxyProject.budgetUsedUsd || 0) + cost; markProjectsDirty(); }
+    if (req._proxyProject.maxCostPerMin) recordCostForRateLimit(req._proxyProjectName, cost);
+  }
+  return res.json(openaiData);
+}
 
 // ============================================================
 // API Proxy — /v1/:provider/*
@@ -2248,10 +2447,15 @@ const proxyMiddleware = createProxyMiddleware({
           sli.proxy.total++; sli.proxy.success++;
           recordUsage(projectName, providerName, modelId, tokens);
           // Phase 1a: Track budget spend
-          if (req._proxyProject?.maxBudgetUsd != null) {
+          if (req._proxyProject?.maxBudgetUsd != null || req._proxyProject?.maxCostPerMin) {
             const cost = calcRequestCost(providerName, modelId, tokens);
-            req._proxyProject.budgetUsedUsd = (req._proxyProject.budgetUsedUsd || 0) + cost;
-            markProjectsDirty();
+            if (req._proxyProject.maxBudgetUsd != null) {
+              req._proxyProject.budgetUsedUsd = (req._proxyProject.budgetUsedUsd || 0) + cost;
+              markProjectsDirty();
+            }
+            if (req._proxyProject.maxCostPerMin) {
+              recordCostForRateLimit(req._proxyProjectName, cost);
+            }
           }
         } catch (e) {
           console.error("Usage tracking error:", e.message);
@@ -2275,8 +2479,15 @@ app.post("/v1/token", apiLimiter, (req, res) => {
   // Also allow HMAC auth for token exchange
   let hmacProj = null;
   if (!proj && req.headers["x-signature"]) {
-    // Find project by trying all enabled projects' HMAC
-    hmacProj = projects.find(p => p.enabled && p.authMode === "hmac" && verifyHmacSignature(p, req).ok);
+    const projId = req.headers["x-project-id"];
+    if (projId) {
+      // Fast path: look up by X-Project-Id (sent by all HMAC clients)
+      const candidate = projects.find(p => p.enabled && p.name === projId && p.authMode === "hmac");
+      if (candidate && verifyHmacSignature(candidate, req).ok) hmacProj = candidate;
+    } else {
+      // Fallback: try all HMAC projects (no X-Project-Id sent)
+      hmacProj = projects.find(p => p.enabled && p.authMode === "hmac" && verifyHmacSignature(p, req).ok);
+    }
   }
   const resolvedProj = proj || hmacProj;
   if (!resolvedProj) return res.status(401).json({ error: "Invalid project key or signature" });
@@ -2319,6 +2530,7 @@ app.use("/v1/:provider", apiLimiter, (req, res, next) => {
       proj = tokenInfo.project;
       if (!proj.enabled) return res.status(403).json({ error: "Project disabled" });
       req._tokenUserId = tokenInfo.userId;
+      req._tokenStr = projectKey;
     }
     // 2. HMAC signature (X-Signature header present, no direct key)
     if (!proj && req.headers["x-signature"]) {
@@ -2357,9 +2569,16 @@ app.use("/v1/:provider", apiLimiter, (req, res, next) => {
     }
 
     // Per-project rate limit (RPM)
-    if (!checkProjectRateLimit(proj)) {
-      return res.status(429).json({ error: "Project rate limit exceeded" });
+    { const rl = checkProjectRateLimit(proj, req); if (!rl.ok) return res.status(429).json({ error: rl.reason === "ip" ? "Per-IP rate limit exceeded for this project" : "Project rate limit exceeded" }); }
+
+    // Per-token rate limit (RPM per ephemeral token)
+    if (req._tokenStr) {
+      const trl = checkTokenRateLimit(req._tokenStr, proj);
+      if (!trl.ok) return res.status(429).json({ error: "Per-token rate limit exceeded" });
     }
+
+    // Cost-based rate limit (USD/min cap)
+    { const crl = checkCostRateLimit(proj); if (!crl.ok) return res.status(429).json({ error: "Project cost rate limit exceeded (USD/min)" }); }
 
     // Anomaly auto-suspend
     if (!checkProjectAnomaly(proj)) {
@@ -2412,6 +2631,11 @@ app.use("/v1/:provider", apiLimiter, (req, res, next) => {
 
   // Stash project name for onProxyRes
   req._proxyProjectName = projectName;
+
+  // Anthropic OpenAI-compat intercept: /v1/chat/completions → /v1/messages + format translation
+  if (providerName === "anthropic" && incomingSubpath === "/v1/chat/completions") {
+    return handleAnthropicCompat(req, res, proxyApiKey);
+  }
 
   // Inject auth — replace any client-sent auth
   if (providerName === "anthropic") {

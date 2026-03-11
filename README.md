@@ -123,6 +123,7 @@ lg restart
 ## Features
 
 - **Multi-Provider Proxy** — Single `/v1/{provider}/` endpoint routes to OpenAI, Anthropic, Gemini, DeepSeek, Kimi, Doubao, Qwen, MiniMax
+- **Anthropic OpenAI Compatibility** — `/v1/anthropic/v1/chat/completions` auto-translates OpenAI request/response format to Anthropic Messages API (streaming + non-streaming). No client changes needed — just swap the provider segment
 - **Hot Maintenance** — Nginx serves cached pages during app restarts (zero downtime)
 - **RPO ≤ 1s** — 1-second coalesced writes + emergency flush on crash = near-zero data loss
 - **Auto-Recovery** — Watchdog detects failures within 10s, auto-restarts containers, handles Docker.raw corruption
@@ -209,7 +210,9 @@ curl -X POST https://lumigate.autorums.com/v1/openai/v1/chat/completions \
 | Layer | Protection |
 |-------|-----------|
 | **HMAC + Token Auth** | Key never transmitted; HMAC-signed token exchange + short-lived ephemeral tokens |
-| **Per-Project Rate Limit** | Independent RPM cap per project (1–10,000 RPM) |
+| **Per-Project Rate Limit** | Independent RPM cap per project (1–10,000 RPM); default 600 RPM for new projects |
+| **Per-Token Rate Limit** | RPM cap per ephemeral token — isolates individual users/sessions |
+| **Cost Rate Limit** | USD/min spend cap per project — hard ceiling on runaway costs |
 | **IP Allowlist** | Per-project IP/CIDR whitelist (up to 50 entries) |
 | **Anomaly Auto-Suspend** | Auto-disable project on 5× traffic spike (10-min baseline) |
 | **Anti-Replay** | 5-min timestamp window + nonce deduplication on HMAC requests |

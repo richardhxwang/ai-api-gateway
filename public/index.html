@@ -699,6 +699,22 @@
       <div class="fg"><label>Budget Limit (USD)</label><input type="number" id="projBudget" placeholder="No limit" min="0" step="0.01"></div>
       <div class="fg"><label>Reset Period</label><select id="projPeriod"><option value="">Lifetime</option><option value="monthly">Monthly</option><option value="daily">Daily</option></select></div>
     </div>
+    <div class="fg-row">
+      <div class="fg"><label>Project RPM</label><div class="fg-hint">Default 600. Total cap for all users.</div>
+        <input type="number" id="projRpm" value="600" min="0" max="10000" step="1">
+      </div>
+      <div class="fg"><label>Per-IP RPM</label><div class="fg-hint">Default 30. Cap per IP.</div>
+        <input type="number" id="projRpmPerIp" value="30" min="0" max="1000" step="1">
+      </div>
+    </div>
+    <div class="fg-row">
+      <div class="fg"><label>Per-Token RPM</label><div class="fg-hint">Default 30. Cap per session.</div>
+        <input type="number" id="projRpmPerToken" value="30" min="0" max="1000" step="1">
+      </div>
+      <div class="fg"><label>Cost Cap ($/min)</label><div class="fg-hint">Default $0.50. Stops abuse.</div>
+        <input type="number" id="projCostPerMin" value="0.5" min="0" max="100" step="0.01">
+      </div>
+    </div>
     <div class="fg"><label>Allowed Models</label><div class="fg-hint">Leave empty = all models allowed.</div>
       <div style="display:flex;gap:6px;margin-bottom:6px">
         <select id="projModelProv" onchange="updateModelDropdown('projModelSel','projModelProv')" style="flex:1"></select>
@@ -790,8 +806,21 @@
         </div>
       </div>
       <div style="border-top:1px solid rgba(0,0,0,0.06);margin:16px 0"></div>
-      <div class="fg"><label>Rate Limit (RPM)</label><div class="fg-hint">Max requests per minute. 0 or empty = unlimited.</div>
-        <input type="number" id="editProjRpm" placeholder="No limit" min="0" max="10000" step="1">
+      <div class="fg-row">
+        <div class="fg"><label>Project RPM</label><div class="fg-hint">Total cap for all users combined.</div>
+          <input type="number" id="editProjRpm" placeholder="No limit" min="0" max="10000" step="1">
+        </div>
+        <div class="fg"><label>Per-IP RPM</label><div class="fg-hint">Cap per IP address.</div>
+          <input type="number" id="editProjRpmPerIp" placeholder="No limit" min="0" max="1000" step="1">
+        </div>
+      </div>
+      <div class="fg-row">
+        <div class="fg"><label>Per-Token RPM</label><div class="fg-hint">Cap per ephemeral token. Limits each device session.</div>
+          <input type="number" id="editProjRpmPerToken" placeholder="= Per-IP" min="0" max="1000" step="1">
+        </div>
+        <div class="fg"><label>Cost Cap ($/min)</label><div class="fg-hint">Max USD spend per minute. Stops expensive model abuse.</div>
+          <input type="number" id="editProjCostPerMin" placeholder="No limit" min="0" max="100" step="0.01">
+        </div>
       </div>
       <div class="fg"><label>IP Allowlist</label><div class="fg-hint">Only these IPs can use this key. One per line. Supports CIDR (e.g. 192.168.1.0/24). Empty = allow all.</div>
         <textarea id="editProjIPs" rows="3" style="font-family:SF Mono,monospace;font-size:12px" placeholder="e.g. 203.0.113.5&#10;10.0.0.0/8"></textarea>
@@ -1013,11 +1042,16 @@ async function saveSystemSettings() {
       body: JSON.stringify(body)
     }).then(r => r.json());
     if (d.success) {
-      showT('Settings applied — no restart needed', 'success');
+      showT('Settings saved', 'success');
       const hint = document.getElementById('settingsSaved');
       hint.style.display = '';
       setTimeout(() => hint.style.display = 'none', 3000);
       loadSystemSettings();
+      // Refresh module visibility
+      fetch(B + '/health').then(r => r.json()).then(h => {
+        activeModules = new Set(h.modules || []);
+        applyRoleUI();
+      }).catch(() => {});
     } else showT(d.error || 'Save failed', 'error');
   } catch (e) { showT(e.message, 'error'); }
 }
@@ -1147,6 +1181,8 @@ async function load() {
       fetch(B + '/providers').then(r => r.json())
     ]);
     providers = p;
+
+    activeModules = new Set(h.modules || []);
 
     const isOk = h.status === 'ok';
     const badge = document.getElementById('hBadge');
@@ -1443,6 +1479,9 @@ async function loadProjects() {
       if (p.authMode === 'hmac') secHtml += `<span class="proj-badge" style="background:rgba(0,122,255,0.08);color:#007aff">HMAC</span>`;
       if (p.authMode === 'token') secHtml += `<span class="proj-badge" style="background:rgba(0,122,255,0.08);color:#007aff">Token</span>`;
       if (p.maxRpm) secHtml += `<span class="proj-badge" style="background:rgba(255,149,0,0.08);color:#ff9500">${p.maxRpm} RPM</span>`;
+      if (p.maxRpmPerIp) secHtml += `<span class="proj-badge" style="background:rgba(255,149,0,0.08);color:#ff9500">${p.maxRpmPerIp}/IP</span>`;
+      if (p.maxRpmPerToken) secHtml += `<span class="proj-badge" style="background:rgba(255,149,0,0.08);color:#ff9500">${p.maxRpmPerToken}/Tok</span>`;
+      if (p.maxCostPerMin) secHtml += `<span class="proj-badge" style="background:rgba(255,59,48,0.08);color:#ff3b30">$${p.maxCostPerMin}/min</span>`;
       if (p.allowedIPs?.length) secHtml += `<span class="proj-badge" style="background:rgba(88,86,214,0.08);color:#5856d6">${p.allowedIPs.length} IP${p.allowedIPs.length>1?'s':''}</span>`;
       if (p.anomalyAutoSuspend) secHtml += `<span class="proj-badge" style="background:rgba(52,199,89,0.08);color:#34c759">Auto-Protect</span>`;
       if (p.suspendReason) secHtml = `<span class="proj-badge" style="background:rgba(255,59,48,0.12);color:#ff3b30">Suspended</span>` + secHtml;
@@ -1498,7 +1537,7 @@ async function updateModelDropdown(selId, provId) {
     try { modelsCache[prov] = await fetch(`${B}/models/${prov}`).then(r => r.json()); } catch { modelsCache[prov] = []; }
   }
   const sel = document.getElementById(selId);
-  sel.innerHTML = (modelsCache[prov] || []).map(m => `<option value="${m.id}">${m.id} (${m.tier})</option>`).join('');
+  sel.innerHTML = '<option value="" disabled selected>Select model...</option>' + (modelsCache[prov] || []).map(m => `<option value="${m.id}">${m.id} (${m.tier})</option>`).join('');
 }
 
 function addModelToList(prefix) {
@@ -1545,6 +1584,10 @@ function openProjM() {
   document.getElementById('projName').value = '';
   document.getElementById('projBudget').value = '';
   document.getElementById('projPeriod').value = '';
+  document.getElementById('projRpm').value = '600';
+  document.getElementById('projRpmPerIp').value = '30';
+  document.getElementById('projRpmPerToken').value = '30';
+  document.getElementById('projCostPerMin').value = '0.5';
   initModelSelector('proj', []);
 }
 function closeProjM() { document.getElementById('projOverlay').classList.remove('show'); }
@@ -1560,6 +1603,14 @@ async function addProj() {
   }
   const models = getSelectedModels('proj');
   if (models.length) body.allowedModels = models;
+  const projRpm = document.getElementById('projRpm').value;
+  if (projRpm !== '') body.maxRpm = parseInt(projRpm, 10);
+  const projRpmIp = document.getElementById('projRpmPerIp').value;
+  if (projRpmIp !== '') body.maxRpmPerIp = parseInt(projRpmIp, 10);
+  const projRpmToken = document.getElementById('projRpmPerToken').value;
+  if (projRpmToken !== '') body.maxRpmPerToken = parseInt(projRpmToken, 10);
+  const projCostMin = document.getElementById('projCostPerMin').value;
+  if (projCostMin !== '') body.maxCostPerMin = parseFloat(projCostMin);
   const d = await fetch(B + '/admin/projects', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
@@ -1590,6 +1641,9 @@ async function openEditProj(name) {
   document.getElementById('editProjTokenTtl').value = proj.tokenTtlMinutes || 60;
   toggleProjAuthUI();
   document.getElementById('editProjRpm').value = proj.maxRpm || '';
+  document.getElementById('editProjRpmPerIp').value = proj.maxRpmPerIp || '';
+  document.getElementById('editProjRpmPerToken').value = proj.maxRpmPerToken || '';
+  document.getElementById('editProjCostPerMin').value = proj.maxCostPerMin || '';
   document.getElementById('editProjIPs').value = (proj.allowedIPs || []).join('\n');
   document.getElementById('editProjAnomaly').checked = proj.anomalyAutoSuspend === true;
   const suspendInfo = document.getElementById('editProjSuspendInfo');
@@ -1726,6 +1780,12 @@ async function saveEditProj() {
   body.tokenTtlMinutes = body.authMode === 'token' ? parseInt(document.getElementById('editProjTokenTtl').value, 10) : null;
   const rpmVal = document.getElementById('editProjRpm').value;
   body.maxRpm = rpmVal === '' ? null : parseInt(rpmVal, 10);
+  const rpmIpVal = document.getElementById('editProjRpmPerIp').value;
+  body.maxRpmPerIp = rpmIpVal === '' ? null : parseInt(rpmIpVal, 10);
+  const rpmTokenVal = document.getElementById('editProjRpmPerToken').value;
+  body.maxRpmPerToken = rpmTokenVal === '' ? null : parseInt(rpmTokenVal, 10);
+  const costMinVal = document.getElementById('editProjCostPerMin').value;
+  body.maxCostPerMin = costMinVal === '' ? null : parseFloat(costMinVal);
   const ipsText = document.getElementById('editProjIPs').value.trim();
   body.allowedIPs = ipsText ? ipsText.split('\n').map(s => s.trim()).filter(Boolean) : null;
   body.anomalyAutoSuspend = document.getElementById('editProjAnomaly').checked;
