@@ -200,13 +200,31 @@ curl -X POST https://lumigate.autorums.com/v1/openai/v1/chat/completions \
 
 ## Performance
 
-| Scenario | QPS | Avg Latency |
-|----------|-----|-------------|
-| Health check (200 concurrent) | 4,270 | 47ms |
-| Dashboard (200 concurrent) | 2,087 | 96ms |
-| Peak burst (500 concurrent) | 4,978 | 100ms |
+### Stress Tests
 
-**Resource usage:** ~24MB total (App 14MB + Nginx 10MB).
+| Scenario | Requests | Concurrency | QPS | Avg Latency | p95 | p99 | Errors |
+|----------|----------|-------------|-----|-------------|-----|-----|--------|
+| Internal health | 20,000 | 250 | 12,788 | 19ms | 14ms | 283ms | 0 |
+| Health check | 1,000 | 200 | 4,270 | 47ms | — | — | 0 |
+| Dashboard | 1,000 | 200 | 2,087 | 96ms | — | — | 0 |
+| Peak burst | 5,000 | 500 | 4,978 | 100ms | — | — | 0 |
+
+### Chaos Tests
+
+| Scenario | Method | Result |
+|----------|--------|--------|
+| Restart under probe (internal) | Stop 3s + start, continuous health polling | 78/78 OK, 0 errors (Nginx cache covers gap) |
+| Restart under probe (external) | Same via Cloudflare tunnel | 66/66 OK, 0 errors |
+| SIGKILL during write burst | 120 project creates → `kill -9` → restart | valid JSON, 240 projects intact, 0 tmp leftovers |
+| Data integrity (RPO ≤1s) | Create project → wait 1.5s → SIGKILL | Data persisted on disk, zero loss |
+
+### Resource Usage
+
+| Component | Memory |
+|-----------|--------|
+| App (Node.js) | ~18 MiB |
+| Nginx | ~10 MiB |
+| **Total** | **~28 MiB** |
 
 ## Project Structure
 
@@ -221,6 +239,7 @@ curl -X POST https://lumigate.autorums.com/v1/openai/v1/chat/completions \
 │   ├── index.html          # Dashboard SPA (Canvas charts, Apple HIG)
 │   └── chat.html           # Built-in chat with SSE streaming
 ├── failover/               # HA configs (cold/hot standby)
+├── reviews/                # Review reports & test results
 ├── data/                   # JSON persistence (Docker volume)
 ├── docker-compose.yml      # Nginx + Express + Cloudflare Tunnel
 ├── .env.example            # Config template

@@ -62,7 +62,7 @@ const MAX_SESSIONS = 10000;
 // --- Module system ---
 // Modules: usage, budget, multikey, users, audit, metrics, backup, smart, chat
 const ALL_MODULES = ["usage", "budget", "multikey", "users", "audit", "metrics", "backup", "smart", "chat"];
-const LITE_MODULES = ["usage", "chat"];
+const LITE_MODULES = ["usage", "chat", "backup"];
 const ENTERPRISE_MODULES = [...ALL_MODULES];
 const DEPLOY_MODE = (process.env.DEPLOY_MODE || "lite").toLowerCase();
 const modules = new Set(
@@ -348,12 +348,16 @@ function restoreBackup(name) {
   return { restored };
 }
 
-// Auto-backup daily (requires "backup" module)
+// Auto-backup interval (requires "backup" module).
+// Lite keeps backup capability with a looser default RPO to minimize background impact.
+const AUTO_BACKUP_INTERVAL_MS = process.env.BACKUP_INTERVAL_MS
+  ? Number(process.env.BACKUP_INTERVAL_MS)
+  : (DEPLOY_MODE === "lite" ? 72 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000);
 if (mod("backup")) {
   setInterval(() => {
     try { createBackup(); audit("system", "auto_backup", null, null); }
     catch (e) { console.error("Auto-backup failed:", e.message); }
-  }, 24 * 60 * 60 * 1000);
+  }, AUTO_BACKUP_INTERVAL_MS);
 }
 
 // --- Multi-key management ---
@@ -1620,7 +1624,8 @@ app.delete("/admin/users/:username", requireModule("users"), requireRole("root",
 });
 
 // ============================================================
-// Metrics, Audit, Backup APIs (enterprise only)
+// Metrics / Audit / Backup APIs
+// (metrics+audit are enterprise-oriented; backup also available in lite)
 // ============================================================
 function requireModule(name) {
   return (req, res, next) => {
@@ -2058,7 +2063,18 @@ const server = app.listen(PORT, "0.0.0.0", () => {
   console.log(`LumiGate running on port ${PORT} [${DEPLOY_MODE} mode, modules: ${[...modules].join(",")}]`);
   console.log(`Available providers: ${available.join(", ")}`);
   console.log(`Admin auth: ${process.env.ADMIN_SECRET ? "configured" : "temporary (set ADMIN_SECRET in .env)"}`);
-  audit("system", "startup", null, { port: PORT, providers: available });
+
+  // M-01: Startup module validation warnings
+  const critical = ["audit", "metrics", "backup"];
+  const disabled = critical.filter(m => !mod(m));
+  if (disabled.length > 0) {
+    console.warn(`WARNING: Enterprise modules disabled: ${disabled.join(", ")}. Set DEPLOY_MODE=enterprise to enable all.`);
+  }
+  if (DEPLOY_MODE === "custom" && modules.size === 0) {
+    console.warn("WARNING: DEPLOY_MODE=custom but no MODULES specified. No optional features active.");
+  }
+
+  audit("system", "startup", null, { port: PORT, mode: DEPLOY_MODE, modules: [...modules], providers: available });
 });
 
 // Track raw TCP connections for graceful shutdown
