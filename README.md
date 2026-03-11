@@ -124,6 +124,7 @@ lg restart
 - **CLI & TUI** — `lg` CLI for quick terminal ops, `tui.js` for full-screen dashboard
 - **Multi-Currency** — 10 currencies (USD, CNY, EUR, GBP, JPY, KRW, HKD, SGD, AUD, CAD)
 - **High Availability** — Cold standby (Plan A, <5MB idle) or hot standby (Plan B) with Cloudflare Tunnel failover
+- **External Hardening** — QUIC tunnel protocol, Nginx auto-retry on 502/503, keepalive connection pooling
 - **Zero-Downtime Config** — Change API keys, add providers via dashboard without restart
 
 ## Self-Healing & Data Safety
@@ -137,6 +138,7 @@ lg restart
 | **Emergency flush** | `uncaughtException` / `unhandledRejection` → sync flush before exit |
 | **Graceful shutdown** | SIGTERM → flush dirty data → drain connections → exit |
 | **Atomic writes** | tmp file + `rename()` on all data files |
+| **Network resilience** | QUIC tunnel, Nginx auto-retry 502/503, keepalive pooling |
 
 **RPO: ≤ 1 second.** Even `docker kill` (SIGKILL) loses at most 1 second of data.
 
@@ -200,23 +202,41 @@ curl -X POST https://lumigate.autorums.com/v1/openai/v1/chat/completions \
 
 ## Performance
 
-### Stress Tests
+### Stress Tests (Internal)
 
 | Scenario | Requests | Concurrency | QPS | Avg Latency | p95 | p99 | Errors |
 |----------|----------|-------------|-----|-------------|-----|-----|--------|
-| Internal health | 20,000 | 250 | 12,788 | 19ms | 14ms | 283ms | 0 |
-| Health check | 1,000 | 200 | 4,270 | 47ms | — | — | 0 |
+| Health (extreme) | 20,000 | 250 | 12,788 | 19ms | 14ms | 283ms | 0 |
+| Health (standard) | 1,000 | 200 | 4,270 | 47ms | — | — | 0 |
 | Dashboard | 1,000 | 200 | 2,087 | 96ms | — | — | 0 |
 | Peak burst | 5,000 | 500 | 4,978 | 100ms | — | — | 0 |
 
-### Chaos Tests
+### Stress Tests (External — Cloudflare Named Tunnel, QUIC)
+
+| Scenario | Requests | Concurrency | Median | p95 | p99 |
+|----------|----------|-------------|--------|-----|-----|
+| Health | 200 | 20 | 207ms | 5,182ms | 11,307ms |
+
+> External latency includes TLS handshake + Cloudflare edge routing (SIN). Production clients with connection reuse see significantly lower latency.
+
+### Chaos & Fault Injection
 
 | Scenario | Method | Result |
 |----------|--------|--------|
-| Restart under probe (internal) | Stop 3s + start, continuous health polling | 78/78 OK, 0 errors (Nginx cache covers gap) |
-| Restart under probe (external) | Same via Cloudflare tunnel | 66/66 OK, 0 errors |
+| Restart under probe (internal) | Stop app 3s → start, continuous health polling | 78/78 OK, 0 errors (Nginx stale cache) |
+| Restart under probe (external) | Same via Cloudflare named tunnel | 66/66 OK, 0 errors |
 | SIGKILL during write burst | 120 project creates → `kill -9` → restart | valid JSON, 240 projects intact, 0 tmp leftovers |
 | Data integrity (RPO ≤1s) | Create project → wait 1.5s → SIGKILL | Data persisted on disk, zero loss |
+
+### Network Hardening
+
+| Layer | Mechanism |
+|-------|-----------|
+| **Tunnel protocol** | QUIC (multiplexed, 0-RTT reconnect) |
+| **Connection pool** | Nginx keepalive 32, 60s timeout, 1000 req/conn |
+| **Auto-retry** | `proxy_next_upstream` on 502/503, 2 tries within 3s |
+| **Upstream failover** | `max_fails=2 fail_timeout=5s` — fast failure detection |
+| **Graceful drain** | Tunnel `grace-period 30s` on shutdown |
 
 ### Resource Usage
 
