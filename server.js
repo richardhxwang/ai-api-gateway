@@ -871,7 +871,8 @@ const MODELS = {
     { id: "claude-opus-4-6", tier: "flagship", price: { in: 5.00, cacheIn: 0.50, out: 25.00 }, caps: ["text", "image", "pdf"], desc: "Autonomous coding, deep research, 200K analysis" },
   ],
   gemini: [
-    { id: "gemini-2.5-flash-lite", tier: "economy", price: { in: 0.10, cacheIn: 0.01, out: 0.40 }, freeRPD: 1500, caps: ["text", "image"], desc: "High-throughput summarization/classification — 1500 free/day" },
+    { id: "gemini-2.5-flash-lite", tier: "economy", price: { in: 0.10, cacheIn: 0.01, out: 0.40 }, freeRPD: 1500, caps: ["text", "image", "audio"], desc: "High-throughput summarization/classification, audio input — 1500 free/day" },
+    { id: "gemini-2.0-flash", tier: "economy", price: { in: 0.10, cacheIn: 0.025, out: 0.40 }, freeRPD: 1500, caps: ["text", "image", "audio", "video"], desc: "Fast multimodal — audio/video/image input, 1M context, 1500 free/day" },
     { id: "gemini-2.5-flash", tier: "standard", price: { in: 0.30, cacheIn: 0.03, out: 2.50 }, freeRPD: 500, caps: ["text", "image", "audio", "video", "pdf"], desc: "Code gen, math reasoning, 1M context — 500 free/day" },
     { id: "gemini-2.5-pro", tier: "flagship", price: { in: 1.25, cacheIn: 0.125, out: 10.00 }, freeRPD: 25, caps: ["text", "image", "audio", "video", "pdf"], desc: "Multimodal video analysis, 1M context — 25 free/day" },
   ],
