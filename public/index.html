@@ -1874,7 +1874,6 @@ function revealAndCopy(el, key) {
 // Multi-Key Management (per provider)
 // ============================================================
 let currentKeysProvider = '';
-let dragKeyId = null;
 let keysDropdownOpen = false;
 
 function toggleKeysDropdown() {
@@ -1911,12 +1910,10 @@ async function loadProviderKeys(provider) {
       return;
     }
     el.innerHTML = keys.map((k, i) => `
-      <div class="key-row" draggable="true" data-kid="${esc(k.id)}"
-           ondragstart="onKeyDragStart(event,'${esc(k.id)}')"
-           ondragover="onKeyDragOver(event)" ondrop="onKeyDrop(event,'${esc(k.id)}')"
-           ondragend="onKeyDragEnd(event)"
+      <div class="key-row" data-kid="${esc(k.id)}"
            style="display:flex;align-items:center;gap:8px;padding:6px 4px;border-radius:8px;font-size:12px;${!k.enabled?'opacity:0.4':''}">
-        <span style="cursor:grab;color:rgba(0,0,0,0.2);font-size:14px" title="Drag to reorder">⠿</span>
+        <span style="cursor:grab;color:rgba(0,0,0,0.2);font-size:14px;touch-action:none" title="Drag to reorder"
+              onpointerdown="startKeyDrag(event,'${esc(k.id)}')">⠿</span>
         <span style="font-weight:600;min-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(k.label)}</span>
         <span style="color:rgba(0,0,0,0.3);font-family:monospace;font-size:11px">${esc(k.keyPreview)}</span>
         ${k.project ? `<span style="display:inline-block;padding:1px 5px;border-radius:4px;font-size:10px;background:rgba(0,122,255,0.08);color:#007aff">${esc(k.project)}</span>` : '<span style="display:inline-block;padding:1px 5px;border-radius:4px;font-size:10px;background:rgba(0,0,0,0.04);color:rgba(0,0,0,0.35)">Public</span>'}
@@ -1982,38 +1979,83 @@ async function deleteProvKey(provider, keyId, label) {
   load();
 }
 
-// Drag-to-reorder
-function onKeyDragStart(e, id) {
-  dragKeyId = id;
-  e.dataTransfer.effectAllowed = 'move';
-  e.target.style.opacity = '0.5';
-}
-function onKeyDragOver(e) {
-  e.preventDefault(); e.dataTransfer.dropEffect = 'move';
-  const row = e.target.closest('.key-row');
-  document.querySelectorAll('#keysList .key-row').forEach(r => r.classList.remove('drag-over'));
-  if (row) row.classList.add('drag-over');
-}
-function onKeyDragEnd(e) {
-  e.target.style.opacity = ''; dragKeyId = null;
-  document.querySelectorAll('#keysList .key-row').forEach(r => r.classList.remove('drag-over'));
-}
-async function onKeyDrop(e, targetId) {
+// Drag-to-reorder (pointer events — works inside position:absolute + overflow:auto, Safari-safe)
+let pkDragId = null, pkDragEl = null, pkGhost = null, pkDragItems = [], pkDragStartY = 0;
+
+function startKeyDrag(e, id) {
   e.preventDefault();
-  if (!dragKeyId || dragKeyId === targetId) return;
-  // Build new order from DOM
-  const rows = [...document.querySelectorAll('#keysList .key-row')];
-  const ids = rows.map(r => r.dataset.kid);
-  const fromIdx = ids.indexOf(dragKeyId);
-  const toIdx = ids.indexOf(targetId);
-  if (fromIdx < 0 || toIdx < 0) return;
-  ids.splice(fromIdx, 1);
-  ids.splice(toIdx, 0, dragKeyId);
-  await fetch(`${B}/admin/keys/${encodeURIComponent(currentKeysProvider)}/reorder`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ order: ids })
+  pkDragId = id;
+  pkDragEl = e.currentTarget.closest('.key-row');
+
+  // Snapshot all rows and their midpoint Y for hit-testing
+  pkDragItems = [...document.querySelectorAll('#keysList .key-row')].map(el => ({
+    el, id: el.dataset.kid,
+    mid: el.getBoundingClientRect().top + el.getBoundingClientRect().height / 2,
+  }));
+
+  // Create floating ghost clone
+  const rect = pkDragEl.getBoundingClientRect();
+  pkGhost = pkDragEl.cloneNode(true);
+  Object.assign(pkGhost.style, {
+    position: 'fixed', left: rect.left + 'px', top: rect.top + 'px',
+    width: rect.width + 'px', height: rect.height + 'px',
+    margin: '0', opacity: '0.85', pointerEvents: 'none', zIndex: '9999',
+    background: 'white', borderRadius: '8px',
+    boxShadow: '0 4px 20px rgba(0,0,0,0.15)', transition: 'none',
   });
-  loadProviderKeys(currentKeysProvider);
+  document.body.appendChild(pkGhost);
+  pkDragEl.style.opacity = '0.25';
+  pkDragStartY = e.clientY;
+
+  document.addEventListener('pointermove', _keyPointerMove);
+  document.addEventListener('pointerup', _keyPointerUp);
+  document.addEventListener('pointercancel', _keyPointerUp);
+}
+
+function _keyPointerMove(e) {
+  if (!pkGhost) return;
+  pkGhost.style.transform = `translateY(${e.clientY - pkDragStartY}px)`;
+
+  // Highlight target row
+  document.querySelectorAll('#keysList .key-row').forEach(r => r.classList.remove('drag-over'));
+  const hit = pkDragItems.find(item => item.id !== pkDragId && e.clientY < item.mid);
+  if (hit) hit.el.classList.add('drag-over');
+  else {
+    const last = pkDragItems[pkDragItems.length - 1];
+    if (last && last.id !== pkDragId) last.el.classList.add('drag-over');
+  }
+}
+
+function _keyPointerUp(e) {
+  document.removeEventListener('pointermove', _keyPointerMove);
+  document.removeEventListener('pointerup', _keyPointerUp);
+  document.removeEventListener('pointercancel', _keyPointerUp);
+
+  if (pkGhost) { pkGhost.remove(); pkGhost = null; }
+  if (pkDragEl) { pkDragEl.style.opacity = ''; pkDragEl = null; }
+  document.querySelectorAll('#keysList .key-row').forEach(r => r.classList.remove('drag-over'));
+
+  if (!pkDragId) return;
+
+  // Compute new order
+  const ids = pkDragItems.map(i => i.id);
+  const fromIdx = ids.indexOf(pkDragId);
+  // Find insertion point: first item whose mid is below pointer
+  const hitIdx = pkDragItems.findIndex(item => item.id !== pkDragId && e.clientY < item.mid);
+  const toIdx = hitIdx < 0 ? ids.length : hitIdx;
+
+  const id = pkDragId;
+  pkDragId = null;
+  if (fromIdx < 0 || fromIdx === toIdx) return;
+
+  ids.splice(fromIdx, 1);
+  const insertAt = toIdx > fromIdx ? toIdx - 1 : toIdx;
+  ids.splice(insertAt, 0, id);
+
+  fetch(`${B}/admin/keys/${encodeURIComponent(currentKeysProvider)}/reorder`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ order: ids }),
+  }).then(() => loadProviderKeys(currentKeysProvider));
 }
 
 // ============================================================
