@@ -971,6 +971,9 @@ const MODELS = {
     { id: "gemini-2.0-flash", tier: "economy", price: { in: 0.10, cacheIn: 0.025, out: 0.40 }, freeRPD: 1500, caps: ["text", "image", "audio", "video"], desc: "Fast multimodal — audio/video/image input, 1M context, 1500 free/day" },
     { id: "gemini-2.5-flash", tier: "standard", price: { in: 0.30, cacheIn: 0.03, out: 2.50 }, freeRPD: 500, caps: ["text", "image", "audio", "video", "pdf"], desc: "Code gen, math reasoning, 1M context — 500 free/day" },
     { id: "gemini-2.5-pro", tier: "flagship", price: { in: 1.25, cacheIn: 0.125, out: 10.00 }, freeRPD: 25, caps: ["text", "image", "audio", "video", "pdf"], desc: "Multimodal video analysis, 1M context — 25 free/day" },
+    { id: "gemini-3.1-flash-lite-preview", tier: "economy", price: { in: 0.25, cacheIn: 0.025, out: 1.50 }, freeRPD: 1500, caps: ["text", "image", "audio", "video"], desc: "Gemini 3.1 — frontier-class at minimum cost, audio/video input — free tier available" },
+    { id: "gemini-3-flash-preview", tier: "standard", price: { in: 0.50, cacheIn: 0.05, out: 3.00 }, freeRPD: 500, caps: ["text", "image", "audio", "video"], desc: "Gemini 3 — frontier-class performance vs larger models, audio/video input — free tier available" },
+    { id: "gemini-3.1-pro-preview", tier: "flagship", price: { in: 2.00, cacheIn: 0.50, out: 12.00 }, freeRPD: 0, caps: ["text", "image", "video"], desc: "Gemini 3.1 — advanced reasoning, complex problem-solving, 1M context — paid only" },
   ],
   deepseek: [
     { id: "deepseek-chat", tier: "economy", price: { in: 0.28, cacheIn: 0.028, out: 0.42 }, caps: ["text"], desc: "V3.2 — chat, translation, summarization, bulk text, 128K" },
@@ -2799,6 +2802,180 @@ app.post("/v1/token", apiLimiter, (req, res) => {
   audit(null, "token_issued", resolvedProj.name, { userId, ttlMin: Math.round(ttl / 60000) });
   res.json({ token, expiresAt: new Date(expiresAt).toISOString(), expiresIn: Math.round(ttl / 1000) });
 });
+
+// ── OTP: Email Verification ──────────────────────────────────────────────────
+const otpStore = new Map(); // lowerEmail → { code, expiresAt, attempts }
+const OTP_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const OTP_MAX_ATTEMPTS = 5;
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [email, info] of otpStore) {
+    if (now > info.expiresAt) otpStore.delete(email);
+  }
+}, 5 * 60 * 1000);
+
+function generateOTP() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+function otpEmailHtml(code) {
+  const digits = code.split('');
+  const digitBoxes = digits.map(d =>
+    `<span style="display:inline-block;width:48px;height:60px;line-height:60px;text-align:center;font-size:32px;font-weight:800;color:#C4805A;background:#FDF7F3;border:2px solid #EDD5C0;border-radius:12px;margin:0 4px;font-family:'SF Mono',Monaco,Menlo,Consolas,monospace;">${d}</span>`
+  ).join('');
+
+  return `<!DOCTYPE html>
+<html lang="zh"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>FurNote Verification Code</title>
+</head>
+<body style="margin:0;padding:0;background:#F5F0EB;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F5F0EB;padding:48px 20px;">
+  <tr><td align="center">
+  <table width="520" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;width:100%;border-radius:20px;overflow:hidden;box-shadow:0 8px 40px rgba(0,0,0,0.10);">
+
+    <!-- Header -->
+    <tr><td style="background:linear-gradient(135deg,#D4956A 0%,#B8714E 100%);padding:48px 40px 40px;text-align:center;">
+      <div style="font-size:56px;line-height:1;margin-bottom:16px;">🐾</div>
+      <div style="color:#fff;font-size:30px;font-weight:800;letter-spacing:-0.5px;margin-bottom:6px;">FurNote</div>
+      <div style="display:inline-block;background:rgba(255,255,255,0.18);color:rgba(255,255,255,0.92);font-size:11px;font-weight:600;letter-spacing:4px;padding:5px 14px;border-radius:20px;">毛孩笔记 · PET CARE AI</div>
+    </td></tr>
+
+    <!-- Body -->
+    <tr><td style="background:#ffffff;padding:48px 40px 36px;">
+
+      <!-- Chinese -->
+      <p style="margin:0 0 6px;font-size:24px;font-weight:700;color:#1a1a1a;">你好 👋</p>
+      <p style="margin:0 0 6px;font-size:15px;color:#555;line-height:1.75;">感谢注册 FurNote。请在 App 中输入下方验证码完成注册。</p>
+      <p style="margin:0 0 32px;font-size:15px;color:#555;line-height:1.75;">验证码 <strong style="color:#C4805A;">10 分钟</strong>内有效，仅限使用一次。</p>
+
+      <!-- Code box -->
+      <div style="background:#FDF7F3;border:2px solid #EDD5C0;border-radius:16px;padding:32px 24px;text-align:center;margin-bottom:36px;">
+        <div style="font-size:11px;color:#C4A882;letter-spacing:4px;font-weight:700;margin-bottom:20px;text-transform:uppercase;">Verification Code · 验证码</div>
+        <div style="white-space:nowrap;">${digitBoxes}</div>
+        <div style="margin-top:20px;font-size:12px;color:#C4A882;">⏱&nbsp; Valid for 10 minutes &nbsp;·&nbsp; One-time use only</div>
+      </div>
+
+      <!-- Divider -->
+      <div style="border-top:1px solid #F0EBE5;margin-bottom:28px;"></div>
+
+      <!-- English -->
+      <p style="margin:0 0 6px;font-size:15px;font-weight:600;color:#1a1a1a;">Hi there 👋</p>
+      <p style="margin:0 0 28px;font-size:14px;color:#888;line-height:1.75;">Thank you for signing up for FurNote. Enter the code above in the app to complete your registration. This code expires in <strong style="color:#C4805A;">10 minutes</strong> and can only be used once.</p>
+
+      <!-- Security note -->
+      <div style="background:#F9F6F3;border-left:3px solid #EDD5C0;border-radius:0 10px 10px 0;padding:14px 18px;">
+        <p style="margin:0;font-size:13px;color:#aaa;line-height:1.65;">
+          🔒 如果这不是你的操作，请忽略此邮件，你的账号仍然安全。<br>
+          <span style="color:#c8c8c8;">If you didn't request this, you can safely ignore this email.</span>
+        </p>
+      </div>
+
+    </td></tr>
+
+    <!-- Footer -->
+    <tr><td style="background:#F0EBE5;padding:24px 40px;text-align:center;border-top:1px solid #E8DDD6;">
+      <p style="margin:0 0 6px;font-size:13px;color:#C4A882;font-weight:600;">FurNote · 为每一只毛孩子而生</p>
+      <p style="margin:0;font-size:11px;color:#ccc;">© ${new Date().getFullYear()} FurNote &nbsp;·&nbsp; Made with 🧡 for your pets</p>
+    </td></tr>
+
+  </table>
+  </td></tr>
+</table>
+</body></html>`;
+}
+
+async function sendOtpEmail(toEmail, code) {
+  const smtpHost = process.env.SMTP_HOST || (settings.smtp || {}).host;
+  const smtpPort = parseInt(process.env.SMTP_PORT || (settings.smtp || {}).port || "587");
+  const smtpUser = process.env.SMTP_USER || (settings.smtp || {}).user;
+  const smtpPass = process.env.SMTP_PASS || (settings.smtp || {}).pass;
+  const smtpFrom = process.env.SMTP_FROM || (settings.smtp || {}).from || `FurNote <${smtpUser}>`;
+  const smtpSecure = process.env.SMTP_SECURE === "true" || (settings.smtp || {}).secure || false;
+
+  if (!smtpHost || !smtpUser || !smtpPass) {
+    log("warn", "[OTP] SMTP not configured — logging code instead", { toEmail, code });
+    return; // dev fallback: code visible in server logs
+  }
+
+  const nodemailer = require("nodemailer");
+  const transporter = nodemailer.createTransport({
+    host: smtpHost,
+    port: smtpPort,
+    secure: smtpSecure,
+    auth: { user: smtpUser, pass: smtpPass },
+  });
+  await transporter.sendMail({
+    from: smtpFrom,
+    to: toEmail,
+    subject: `【FurNote】验证码 ${code} · Verification Code`,
+    html: otpEmailHtml(code),
+  });
+  log("info", "[OTP] Email sent", { toEmail });
+}
+
+function resolveOtpAuth(req) {
+  const bearer = (req.headers["authorization"] || "").replace(/^Bearer\s+/i, "");
+  if (bearer.startsWith("et_")) {
+    const info = ephemeralTokens.get(bearer);
+    if (info && Date.now() <= info.expiresAt && info.project?.enabled) return info.project;
+  }
+  if (req.headers["x-signature"]) {
+    const projId = req.headers["x-project-id"];
+    if (projId) {
+      const candidate = projects.find(p => p.enabled && p.name === projId && p.authMode === "hmac");
+      if (candidate && verifyHmacSignature(candidate, req).ok) return candidate;
+    }
+  }
+  return null;
+}
+
+app.post("/v1/otp/send", apiLimiter, async (req, res) => {
+  if (!resolveOtpAuth(req)) return res.status(401).json({ error: "Unauthorized" });
+  const { email } = req.body || {};
+  if (!email || typeof email !== "string" || !email.includes("@")) {
+    return res.status(400).json({ error: "Invalid email" });
+  }
+  const lowerEmail = email.toLowerCase().trim();
+  const code = generateOTP();
+  otpStore.set(lowerEmail, { code, expiresAt: Date.now() + OTP_TTL_MS, attempts: 0 });
+  try {
+    await sendOtpEmail(lowerEmail, code);
+  } catch (err) {
+    log("error", "[OTP] Email send failed", { err: err.message, toEmail: lowerEmail });
+    return res.status(500).json({ error: "Failed to send verification email" });
+  }
+  audit(null, "otp_sent", null, { email: lowerEmail });
+  res.json({ ok: true });
+});
+
+app.post("/v1/otp/verify", apiLimiter, async (req, res) => {
+  if (!resolveOtpAuth(req)) return res.status(401).json({ error: "Unauthorized" });
+  const { email, code } = req.body || {};
+  if (!email || !code) return res.status(400).json({ error: "Missing email or code" });
+  const lowerEmail = email.toLowerCase().trim();
+  const stored = otpStore.get(lowerEmail);
+  if (!stored) return res.status(400).json({ error: "No OTP found — request a new one" });
+  if (Date.now() > stored.expiresAt) {
+    otpStore.delete(lowerEmail);
+    return res.status(400).json({ error: "OTP expired" });
+  }
+  stored.attempts += 1;
+  if (stored.attempts > OTP_MAX_ATTEMPTS) {
+    otpStore.delete(lowerEmail);
+    return res.status(400).json({ error: "Too many attempts — request a new code" });
+  }
+  if (!safeEqual(stored.code, code.toString().trim())) {
+    return res.status(400).json({ error: "Invalid code" });
+  }
+  otpStore.delete(lowerEmail);
+  audit(null, "otp_verified", null, { email: lowerEmail });
+  res.json({ ok: true });
+});
+
+// ── End OTP ──────────────────────────────────────────────────────────────────
 
 app.use("/v1/:provider", apiLimiter, (req, res, next) => {
   // Identify project: internal chat key, admin session, project key, or reject
