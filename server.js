@@ -172,9 +172,12 @@ function isPrivateIP(ip) {
 }
 
 // F-06: Normalize IP for rate-limit keying (handle IPv6-mapped IPv4)
+// Prefer CF-Connecting-IP (injected by Cloudflare edge, cannot be spoofed when behind CF).
+// Fall back to req.ip (set by Express trust proxy from X-Forwarded-For chain).
+// Never trust a raw X-Forwarded-For from the client directly.
 function normalizeIP(req) {
-  const forwarded = req.headers["x-forwarded-for"]?.split(",")[0]?.trim();
-  const ip = forwarded || req.ip || "unknown";
+  const cfIp = req.headers["cf-connecting-ip"]?.trim();
+  const ip = cfIp || req.ip || "unknown";
   if (ip.startsWith("::ffff:")) return ip.slice(7);
   return ip;
 }
@@ -1413,7 +1416,45 @@ app.put("/admin/projects/:name", requireRole("root", "admin"), (req, res) => {
     if (!validateProjectName(req.body.newName)) {
       return res.json({ success: false, error: "Invalid project name" });
     }
-    proj.name = req.body.newName;
+    const newName = req.body.newName;
+    if (newName !== proj.name && projects.some(p => p.name === newName)) {
+      return res.json({ success: false, error: "Project name already exists" });
+    }
+    if (newName !== proj.name) {
+      const oldName = proj.name;
+      proj.name = newName;
+      // Cascade: update user project bindings
+      for (const u of users) {
+        if (Array.isArray(u.projects)) {
+          u.projects = u.projects.map(n => n === oldName ? newName : n);
+        }
+      }
+      saveUsers(users);
+      // Cascade: update ephemeral tokens
+      for (const info of ephemeralTokens.values()) {
+        if (info.projectName === oldName) {
+          info.projectName = newName;
+          info.project = proj; // same object reference, already renamed
+        }
+      }
+      // Cascade: update provider keys linked to this project
+      let keysDirty = false;
+      for (const k of keys) {
+        if (k.project === oldName) { k.project = newName; keysDirty = true; }
+      }
+      if (keysDirty) saveKeys(keys);
+      // Cascade: rename in-memory rate buckets and anomaly history
+      const oldBucket = projectRateBuckets.get(oldName);
+      if (oldBucket) { projectRateBuckets.delete(oldName); projectRateBuckets.set(newName, oldBucket); }
+      for (const [k, v] of projectIpRateBuckets) {
+        if (k.startsWith(oldName + ":")) {
+          projectIpRateBuckets.delete(k);
+          projectIpRateBuckets.set(newName + k.slice(oldName.length), v);
+        }
+      }
+      const oldHistory = projectMinuteHistory.get(oldName);
+      if (oldHistory) { projectMinuteHistory.delete(oldName); projectMinuteHistory.set(newName, oldHistory); }
+    }
   }
   // Phase 1a: Budget update
   if (req.body.maxBudgetUsd !== undefined) {
@@ -2725,6 +2766,11 @@ const proxyMiddleware = createProxyMiddleware({
 app.post("/v1/token", apiLimiter, (req, res) => {
   const projectKey = req.headers["x-project-key"] || (req.headers["authorization"] || "").replace(/^Bearer\s+/i, "");
   const proj = projects.find(p => p.enabled && safeEqual(p.key, projectKey));
+  // Critical: HMAC projects must not accept direct key for token exchange —
+  // the whole point of HMAC is that the raw key never leaves the client.
+  if (proj && proj.authMode === "hmac") {
+    return res.status(403).json({ error: "This project requires HMAC signature authentication. Use HMAC headers instead of a direct key to exchange a token." });
+  }
   // Also allow HMAC auth for token exchange
   let hmacProj = null;
   if (!proj && req.headers["x-signature"]) {
