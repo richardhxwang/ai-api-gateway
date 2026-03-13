@@ -186,6 +186,10 @@ function normalizeIP(req) {
 // Two tiers: project-wide total RPM + per-IP RPM within project
 const projectRateBuckets = new Map(); // projectName -> { count, resetAt }
 const projectIpRateBuckets = new Map(); // "projectName:ip" -> { count, resetAt }
+const projectTokenIssueBuckets = new Map(); // projectName -> { count, resetAt } — limits token generation rate
+// Default: max 20 token issuances per project per minute.
+// Prevents multi-token bypass: attacker with 1 pk_ cannot issue N tokens to multiply per-token RPM.
+const TOKEN_ISSUE_RPM = 20;
 function checkProjectRateLimit(proj, req) {
   const now = Date.now();
   // Tier 1: Per-IP within project (maxRpmPerIp)
@@ -1465,6 +1469,8 @@ app.put("/admin/projects/:name", requireRole("root", "admin"), (req, res) => {
       // Cascade: rename in-memory rate buckets and anomaly history
       const oldBucket = projectRateBuckets.get(oldName);
       if (oldBucket) { projectRateBuckets.delete(oldName); projectRateBuckets.set(newName, oldBucket); }
+      const oldIssueBucket = projectTokenIssueBuckets.get(oldName);
+      if (oldIssueBucket) { projectTokenIssueBuckets.delete(oldName); projectTokenIssueBuckets.set(newName, oldIssueBucket); }
       for (const [k, v] of projectIpRateBuckets) {
         if (k.startsWith(oldName + ":")) {
           projectIpRateBuckets.delete(k);
@@ -2805,6 +2811,16 @@ app.post("/v1/token", apiLimiter, (req, res) => {
   }
   const resolvedProj = proj || hmacProj;
   if (!resolvedProj) return res.status(401).json({ error: "Invalid project key or signature" });
+
+  // Per-project token issuance rate limit — prevents multi-token bypass attack:
+  // without this, one pk_ can issue N tokens × maxRpmPerToken RPM = effectively bypass per-token limit.
+  { const now = Date.now();
+    let tb = projectTokenIssueBuckets.get(resolvedProj.name);
+    if (!tb || now >= tb.resetAt) { tb = { count: 0, resetAt: now + 60000 }; projectTokenIssueBuckets.set(resolvedProj.name, tb); }
+    tb.count++;
+    if (tb.count > TOKEN_ISSUE_RPM) return res.status(429).json({ error: "Token issuance rate limit exceeded. Try again in a minute." });
+  }
+
   // Count existing tokens for this project
   let count = 0;
   for (const info of ephemeralTokens.values()) { if (info.projectName === resolvedProj.name) count++; }
