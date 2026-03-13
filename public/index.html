@@ -645,6 +645,29 @@
 
         <div style="border-top:1px solid rgba(0,0,0,0.06);margin:20px 0"></div>
 
+        <!-- Stealth Mode -->
+        <div style="margin-bottom:24px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+            <div style="font-size:13px;font-weight:600;color:rgba(0,0,0,0.7)">Stealth Mode</div>
+            <div id="stealthBadge" style="display:none;font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;background:rgba(255,59,48,0.1);color:#ff3b30">ACTIVE</div>
+          </div>
+          <div style="font-size:12px;color:rgba(0,0,0,0.4);margin-bottom:12px;line-height:1.6">
+            开启后 LumiGate 不记录任何请求内容、token、usage、audit 日志。<br>
+            纯转发模式——内容在内存中一闪而过，磁盘零落地。
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+            <label class="switch"><input type="checkbox" id="stealthMode" onchange="onStealthChange()"><span class="slider"></span></label>
+            <span style="font-size:13px;color:rgba(0,0,0,0.6)">启用 Stealth Mode</span>
+          </div>
+          <div id="stealthNginxNote" style="display:none;font-size:12px;background:rgba(255,149,0,0.08);border:1px solid rgba(255,149,0,0.2);border-radius:8px;padding:10px 12px;color:rgba(0,0,0,0.6);line-height:1.6">
+            ⚠️ Nginx access log 变更需要手动 reload：<br>
+            <code style="font-size:11px;background:rgba(0,0,0,0.06);padding:2px 6px;border-radius:4px;user-select:all">docker exec lumigate-nginx nginx -s reload</code>
+            <button class="btn sm" style="margin-left:8px;font-size:11px" onclick="copyNginxReload()">复制</button>
+          </div>
+        </div>
+
+        <div style="border-top:1px solid rgba(0,0,0,0.06);margin:20px 0"></div>
+
         <!-- Auth Mode -->
         <div style="margin-bottom:24px">
           <div style="font-size:13px;font-weight:600;color:rgba(0,0,0,0.7);margin-bottom:10px">Admin Authentication</div>
@@ -664,6 +687,73 @@
 
         <div style="border-top:1px solid rgba(0,0,0,0.06);margin:20px 0"></div>
 
+        <!-- MFA -->
+        <div style="margin-bottom:24px">
+          <div style="font-size:13px;font-weight:600;color:rgba(0,0,0,0.7);margin-bottom:4px">Two-Factor Authentication (MFA)</div>
+          <div style="font-size:12px;color:rgba(0,0,0,0.4);margin-bottom:12px">Compatible with Google Authenticator, Okta Verify, and any TOTP app.</div>
+          <div id="mfaStatus" style="font-size:12px;color:rgba(0,0,0,0.45);margin-bottom:10px">Checking…</div>
+          <div id="mfaSetupFlow" style="display:none">
+            <div style="background:rgba(0,0,0,0.03);border-radius:10px;padding:14px;margin-bottom:10px">
+              <div style="font-size:12px;font-weight:600;margin-bottom:10px">1. Scan with your authenticator app</div>
+              <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+                <img id="mfaQrImg" style="border-radius:8px;flex-shrink:0;width:160px;height:160px;display:none" alt="QR Code">
+                <div id="mfaQrLoading" style="width:160px;height:160px;border-radius:8px;background:rgba(0,0,0,0.04);display:flex;align-items:center;justify-content:center;font-size:12px;color:rgba(0,0,0,0.3)">Loading…</div>
+                <div style="flex:1;min-width:160px">
+                  <div style="font-size:11px;color:rgba(0,0,0,0.45);margin-bottom:6px">Or enter key manually:</div>
+                  <div id="mfaSecret" style="font-size:13px;font-family:monospace;font-weight:600;letter-spacing:2px;color:#1c1c1e;background:rgba(0,0,0,0.06);padding:8px 10px;border-radius:6px;user-select:all;word-break:break-all;cursor:copy" onclick="copyMfaSecret()" title="Click to copy"></div>
+                  <div style="font-size:11px;color:rgba(0,0,0,0.3);margin-top:4px">Click to copy key</div>
+                </div>
+              </div>
+            </div>
+            <div style="font-size:12px;font-weight:600;margin-bottom:6px">2. Enter code to confirm</div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input type="text" id="mfaConfirmCode" placeholder="000000" maxlength="6" inputmode="numeric"
+                style="flex:1;padding:8px 12px;border-radius:8px;border:1px solid rgba(0,0,0,0.1);font-size:18px;letter-spacing:4px;text-align:center;font-weight:600;font-family:inherit;outline:none">
+              <button class="btn pri sm" onclick="confirmMfaSetup()">Activate</button>
+              <button class="btn sm" onclick="cancelMfaSetup()">Cancel</button>
+            </div>
+          </div>
+          <div id="mfaDisableFlow" style="display:none;margin-top:8px">
+            <div style="display:flex;gap:8px;align-items:center">
+              <input type="text" id="mfaDisableCode" placeholder="Enter current code to disable" maxlength="6" inputmode="numeric"
+                style="flex:1;padding:8px 12px;border-radius:8px;border:1px solid rgba(0,0,0,0.1);font-size:15px;letter-spacing:2px;text-align:center;font-family:inherit;outline:none">
+              <button class="btn sm" style="color:#ff3b30;border-color:rgba(255,59,48,0.3)" onclick="disableMfa()">Disable</button>
+              <button class="btn sm" onclick="document.getElementById('mfaDisableFlow').style.display='none'">Cancel</button>
+            </div>
+          </div>
+          <div id="mfaActions" style="display:flex;gap:8px;margin-top:8px">
+            <button class="btn sm" id="mfaSetupBtn" onclick="startMfaSetup()" style="display:none">Enable MFA</button>
+            <button class="btn sm" id="mfaDisableBtn" onclick="document.getElementById('mfaDisableFlow').style.display=''" style="display:none;color:#ff3b30;border-color:rgba(255,59,48,0.3)">Disable MFA</button>
+          </div>
+        </div>
+
+        <div style="border-top:1px solid rgba(0,0,0,0.06);margin:20px 0"></div>
+
+        <!-- SMTP -->
+        <div style="margin-bottom:24px">
+          <div style="font-size:13px;font-weight:600;color:rgba(0,0,0,0.7);margin-bottom:4px">Email (SMTP)</div>
+          <div style="font-size:12px;color:rgba(0,0,0,0.4);margin-bottom:12px">用于发送告警、rotating token 等。功能预留，配置现在保存，发送逻辑后续接入。</div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+            <label class="switch"><input type="checkbox" id="smtpEnabled"><span class="slider"></span></label>
+            <span style="font-size:13px;color:rgba(0,0,0,0.6)">启用 SMTP</span>
+          </div>
+          <div class="fg-row">
+            <div class="fg" style="flex:2"><label>SMTP Host</label><input type="text" id="smtpHost" placeholder="smtp.gmail.com"></div>
+            <div class="fg" style="flex:1"><label>Port</label><input type="number" id="smtpPort" placeholder="587" value="587" min="1" max="65535"></div>
+          </div>
+          <div class="fg-row">
+            <div class="fg"><label>Username</label><input type="text" id="smtpUser" placeholder="you@gmail.com" autocomplete="off"></div>
+            <div class="fg"><label>Password / App Password</label><input type="password" id="smtpPass" placeholder="留空则不更新" autocomplete="new-password"></div>
+          </div>
+          <div class="fg-row">
+            <div class="fg"><label>From Address</label><input type="email" id="smtpFrom" placeholder="noreply@yourdomain.com"></div>
+            <div class="fg"><label>To Address (管理员)</label><input type="email" id="smtpTo" placeholder="admin@yourdomain.com"></div>
+          </div>
+          <div id="smtpPasswordHint" style="font-size:11px;color:rgba(0,0,0,0.35);margin-top:-8px;margin-bottom:8px;display:none">✓ 密码已保存（留空则不更新）</div>
+        </div>
+
+        <div style="border-top:1px solid rgba(0,0,0,0.06);margin:20px 0"></div>
+
         <!-- System Info -->
         <div style="margin-bottom:16px">
           <div style="font-size:13px;font-weight:600;color:rgba(0,0,0,0.7);margin-bottom:10px">System Info</div>
@@ -673,6 +763,7 @@
         <div style="margin-top:20px;display:flex;align-items:center;gap:12px">
           <button class="btn pri" onclick="saveSystemSettings()">Save Settings</button>
           <span id="settingsSaved" style="display:none;font-size:12px;color:#34c759">Changes applied (no restart needed)</span>
+          <button class="btn" onclick="doLogout()" style="margin-left:auto;color:#ff3b30;border-color:rgba(255,59,48,0.3)">Logout</button>
         </div>
 
       </div>
@@ -746,6 +837,11 @@
         <label style="margin:0;flex-shrink:0">Spent</label>
         <span id="editProjSpent" style="font-size:12px;color:rgba(0,0,0,0.5)">$0.00</span>
         <button class="btn sm" onclick="resetEditBudget()" style="font-size:10px;padding:2px 8px;min-height:24px">Reset</button>
+      </div>
+      <div class="fg" style="display:flex;align-items:center;gap:10px;margin-top:4px">
+        <label class="switch"><input type="checkbox" id="editProjSubSpending"><span class="slider"></span></label>
+        <span style="font-size:13px">Coding Plan counts towards budget</span>
+        <span style="font-size:11px;color:rgba(0,0,0,0.35)">(does not affect global cost totals)</span>
       </div>
     </div>
     <div class="modal-tab-pane" id="editTab1">
@@ -841,18 +937,38 @@
 <div class="overlay" id="loginOverlay">
   <div class="modal">
     <h3>Login</h3>
-    <div class="login-tabs" style="display:flex;gap:0;margin-bottom:12px;border-radius:8px;overflow:hidden;border:1px solid rgba(0,0,0,0.08)">
-      <button class="login-tab active" onclick="switchLoginTab('secret')" id="ltSecret" style="flex:1;padding:8px;font-size:12px;font-weight:600;border:none;cursor:pointer;background:rgba(0,113,227,0.08);color:#0071e3">Admin Secret</button>
-      <button class="login-tab" onclick="switchLoginTab('user')" id="ltUser" style="flex:1;padding:8px;font-size:12px;font-weight:600;border:none;cursor:pointer;background:transparent;color:rgba(0,0,0,0.4)">Username</button>
+    <!-- Step 1: credentials -->
+    <div id="loginStep1">
+      <div class="login-tabs" style="display:flex;gap:0;margin-bottom:12px;border-radius:8px;overflow:hidden;border:1px solid rgba(0,0,0,0.08)">
+        <button class="login-tab active" onclick="switchLoginTab('secret')" id="ltSecret" style="flex:1;padding:8px;font-size:12px;font-weight:600;border:none;cursor:pointer;background:rgba(0,113,227,0.08);color:#0071e3">Admin Secret</button>
+        <button class="login-tab" onclick="switchLoginTab('user')" id="ltUser" style="flex:1;padding:8px;font-size:12px;font-weight:600;border:none;cursor:pointer;background:transparent;color:rgba(0,0,0,0.4)">Username</button>
+      </div>
+      <div id="loginSecretPane">
+        <div class="fg"><label>Admin Secret</label><input type="password" id="loginSecret" placeholder="Enter ADMIN_SECRET"></div>
+      </div>
+      <div id="loginUserPane" style="display:none">
+        <div class="fg"><label>Username</label><input type="text" id="loginUsername" placeholder="Username" autocomplete="username"></div>
+        <div class="fg"><label>Password</label><input type="password" id="loginPassword" placeholder="Password" autocomplete="current-password"></div>
+      </div>
+      <div class="modal-foot"><button class="btn pri" onclick="doLogin()">Login</button></div>
     </div>
-    <div id="loginSecretPane">
-      <div class="fg"><label>Admin Secret</label><input type="password" id="loginSecret" placeholder="Enter ADMIN_SECRET"></div>
+    <!-- Step 2: MFA code -->
+    <div id="loginStep2" style="display:none">
+      <div style="text-align:center;margin-bottom:16px">
+        <div style="font-size:32px;margin-bottom:8px">🔐</div>
+        <div style="font-size:13px;color:rgba(0,0,0,0.5);line-height:1.5">Enter the 6-digit code from<br>Google Authenticator or Okta Verify</div>
+      </div>
+      <div class="fg">
+        <label>Authentication Code</label>
+        <input type="text" id="mfaCode" placeholder="000000" maxlength="6" inputmode="numeric" pattern="[0-9]*"
+          style="letter-spacing:8px;font-size:22px;text-align:center;font-weight:600"
+          onkeydown="if(event.key==='Enter')doMfaLogin()">
+      </div>
+      <div class="modal-foot" style="gap:8px">
+        <button class="btn" onclick="cancelMfa()">Back</button>
+        <button class="btn pri" onclick="doMfaLogin()">Verify</button>
+      </div>
     </div>
-    <div id="loginUserPane" style="display:none">
-      <div class="fg"><label>Username</label><input type="text" id="loginUsername" placeholder="Username" autocomplete="username"></div>
-      <div class="fg"><label>Password</label><input type="password" id="loginPassword" placeholder="Password" autocomplete="current-password"></div>
-    </div>
-    <div class="modal-foot"><button class="btn pri" onclick="doLogin()">Login</button></div>
   </div>
 </div>
 <div class="overlay" id="userOverlay">
@@ -964,11 +1080,148 @@ async function loadSystemSettings() {
     if (d.authLastRotated) {
       document.getElementById('settingsAuthLastRotated').textContent = 'Last rotated: ' + new Date(d.authLastRotated).toLocaleString();
     }
+    // Stealth
+    document.getElementById('stealthMode').checked = !!d.stealthMode;
+    document.getElementById('stealthBadge').style.display = d.stealthMode ? '' : 'none';
+    document.getElementById('stealthNginxNote').style.display = d.stealthMode ? '' : 'none';
+    // SMTP
+    document.getElementById('smtpEnabled').checked = !!d.smtpEnabled;
+    document.getElementById('smtpHost').value = d.smtpHost || '';
+    document.getElementById('smtpPort').value = d.smtpPort || 587;
+    document.getElementById('smtpUser').value = d.smtpUser || '';
+    document.getElementById('smtpFrom').value = d.smtpFrom || '';
+    document.getElementById('smtpTo').value = d.smtpTo || '';
+    document.getElementById('smtpPass').value = '';
+    document.getElementById('smtpPasswordHint').style.display = d.smtpHasPassword ? '' : 'none';
     // Info
-    document.getElementById('settingsInfo').innerHTML =
-      `Current mode: <b>${d.deployMode}</b><br>` +
-      `Active modules: <b>${d.modules.join(', ')}</b>`;
+    {
+      const infoEl = document.getElementById('settingsInfo');
+      infoEl.innerHTML = '';
+      const line1 = document.createElement('span');
+      line1.textContent = 'Current mode: ';
+      const b1 = document.createElement('b');
+      b1.textContent = d.deployMode;
+      line1.appendChild(b1);
+      infoEl.appendChild(line1);
+      infoEl.appendChild(document.createElement('br'));
+      const line2 = document.createElement('span');
+      line2.textContent = 'Active modules: ';
+      const b2 = document.createElement('b');
+      b2.textContent = d.modules.join(', ');
+      line2.appendChild(b2);
+      infoEl.appendChild(line2);
+    }
   } catch (e) { console.error('loadSettings:', e); }
+  // Load MFA status
+  loadMfaStatus();
+}
+
+// ============================================================
+// MFA Setup (Settings tab, root/admin users)
+// ============================================================
+let _mfaUri = '';
+
+async function loadMfaStatus() {
+  try {
+    const d = await fetch(B + '/admin/mfa/status').then(r => r.json());
+    const statusEl = document.getElementById('mfaStatus');
+    const setupBtn = document.getElementById('mfaSetupBtn');
+    const disableBtn = document.getElementById('mfaDisableBtn');
+    if (d.mfaEnabled) {
+      statusEl.innerHTML = '<span style="color:#34c759;font-weight:600">✓ MFA is enabled</span>';
+      setupBtn.style.display = 'none';
+      disableBtn.style.display = '';
+    } else {
+      statusEl.innerHTML = '<span style="color:rgba(0,0,0,0.4)">MFA is not enabled</span>';
+      setupBtn.style.display = '';
+      disableBtn.style.display = 'none';
+    }
+  } catch {}
+}
+
+async function startMfaSetup() {
+  try {
+    const d = await fetch(B + '/admin/mfa/setup', { method: 'POST', headers: { 'Content-Type': 'application/json' } }).then(r => r.json());
+    if (d.error) { showT(d.error, 'error'); return; }
+    _mfaUri = d.otpauthUrl;
+    // Format secret in groups of 4 for readability
+    document.getElementById('mfaSecret').textContent = d.secret.match(/.{1,4}/g).join(' ');
+    // Fetch QR code from server (no CDN needed)
+    const qrImg = document.getElementById('mfaQrImg');
+    const qrLoading = document.getElementById('mfaQrLoading');
+    qrImg.style.display = 'none'; qrLoading.style.display = '';
+    fetch(`${B}/admin/mfa/qr?uri=${encodeURIComponent(d.otpauthUrl)}`)
+      .then(r => r.json()).then(q => {
+        if (q.dataUrl) { qrImg.src = q.dataUrl; qrImg.style.display = ''; qrLoading.style.display = 'none'; }
+      }).catch(() => { qrLoading.textContent = 'QR unavailable'; });
+    document.getElementById('mfaSetupFlow').style.display = '';
+    document.getElementById('mfaActions').style.display = 'none';
+    document.getElementById('mfaConfirmCode').value = '';
+    setTimeout(() => document.getElementById('mfaConfirmCode').focus(), 100);
+  } catch (e) { showT(e.message, 'error'); }
+}
+
+function copyMfaSecret() {
+  const raw = document.getElementById('mfaSecret').textContent.replace(/\s/g, '');
+  navigator.clipboard?.writeText(raw).then(() => showT('Key copied', 'success')).catch(() => {});
+}
+
+async function confirmMfaSetup() {
+  const code = document.getElementById('mfaConfirmCode').value.trim();
+  if (!code) return;
+  try {
+    const r = await fetch(B + '/admin/mfa/confirm', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code })
+    });
+    const d = await r.json();
+    if (r.ok && d.success) {
+      document.getElementById('mfaSetupFlow').style.display = 'none';
+      document.getElementById('mfaActions').style.display = '';
+      showT('MFA enabled successfully', 'success');
+      loadMfaStatus();
+    } else {
+      showT(d.error || 'Invalid code', 'error');
+      document.getElementById('mfaConfirmCode').value = '';
+      document.getElementById('mfaConfirmCode').focus();
+    }
+  } catch (e) { showT(e.message, 'error'); }
+}
+
+function onStealthChange() {
+  const on = document.getElementById('stealthMode').checked;
+  document.getElementById('stealthBadge').style.display = on ? '' : 'none';
+  document.getElementById('stealthNginxNote').style.display = on ? '' : 'none';
+}
+
+function copyNginxReload() {
+  navigator.clipboard?.writeText('docker exec lumigate-nginx nginx -s reload')
+    .then(() => showT('命令已复制', 'success')).catch(() => {});
+}
+
+function cancelMfaSetup() {
+  document.getElementById('mfaSetupFlow').style.display = 'none';
+  document.getElementById('mfaActions').style.display = '';
+}
+
+async function disableMfa() {
+  const code = document.getElementById('mfaDisableCode').value.trim();
+  if (!code) return;
+  try {
+    const r = await fetch(B + '/admin/mfa', {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code })
+    });
+    const d = await r.json();
+    if (r.ok && d.success) {
+      document.getElementById('mfaDisableFlow').style.display = 'none';
+      showT('MFA disabled', 'success');
+      loadMfaStatus();
+    } else {
+      showT(d.error || 'Invalid code', 'error');
+      document.getElementById('mfaDisableCode').value = '';
+    }
+  } catch (e) { showT(e.message, 'error'); }
 }
 
 function renderSettingsMode() {
@@ -988,12 +1241,12 @@ function renderSettingsModules(allMods) {
   const wrap = document.getElementById('settingsModuleList');
   wrap.innerHTML = (allMods || []).map(m => {
     const on = _selectedModules.has(m);
-    return `<button class="btn sm" onclick="toggleModule('${m}')" id="modBtn-${m}" style="
+    return `<button class="btn sm" data-action="toggleModule" data-module="${esc(m)}" id="modBtn-${esc(m)}" style="
       background:${on ? 'rgba(52,199,89,0.1)' : 'rgba(0,0,0,0.03)'};
       border-color:${on ? 'rgba(52,199,89,0.4)' : 'rgba(0,0,0,0.08)'};
       color:${on ? '#34c759' : 'rgba(0,0,0,0.35)'};
       font-weight:${on ? '600' : '400'}
-    ">${MODULE_LABELS[m] || m}</button>`;
+    ">${esc(MODULE_LABELS[m] || m)}</button>`;
   }).join('');
 }
 
@@ -1028,13 +1281,22 @@ async function saveSystemSettings() {
   const confirmed = await confirmDangerous('Confirm Settings Change', 'Enter admin secret to apply changes.');
   if (!confirmed) return;
   const secret = document.getElementById('confirmSecret').value;
+  const smtpPass = document.getElementById('smtpPass').value;
   const body = {
     confirmSecret: secret,
+    stealthMode: document.getElementById('stealthMode').checked,
     deployMode: _selectedMode,
     enabledModules: [..._selectedModules],
     authMode: document.getElementById('settingsAuthMode').value,
     authEmail: document.getElementById('settingsAuthEmail').value,
     authRotateHours: Number(document.getElementById('settingsAuthRotateHours').value) || 24,
+    smtpEnabled: document.getElementById('smtpEnabled').checked,
+    smtpHost: document.getElementById('smtpHost').value.trim(),
+    smtpPort: Number(document.getElementById('smtpPort').value) || 587,
+    smtpUser: document.getElementById('smtpUser').value.trim(),
+    smtpFrom: document.getElementById('smtpFrom').value.trim(),
+    smtpTo: document.getElementById('smtpTo').value.trim(),
+    ...(smtpPass ? { smtpPass } : {}),
   };
   try {
     const d = await fetch(B + '/admin/settings', {
@@ -1132,6 +1394,8 @@ function switchLoginTab(tab) {
   else { u.style.background = 'rgba(0,113,227,0.08)'; u.style.color = '#0071e3'; s.style.background = 'transparent'; s.style.color = 'rgba(0,0,0,0.4)'; }
 }
 
+let _pendingMfaToken = null;
+
 async function doLogin() {
   let body;
   const secretPane = document.getElementById('loginSecretPane');
@@ -1151,18 +1415,87 @@ async function doLogin() {
       body: JSON.stringify(body)
     });
     const d = await r.json();
+    if (d.mfaRequired) {
+      _pendingMfaToken = d.mfaToken;
+      document.getElementById('loginStep1').style.display = 'none';
+      document.getElementById('loginStep2').style.display = '';
+      document.getElementById('mfaCode').value = '';
+      setTimeout(() => document.getElementById('mfaCode').focus(), 50);
+      return;
+    }
     if (r.ok && d.success) {
-      document.getElementById('loginOverlay').classList.remove('show');
-      adminAuthed = true;
-      userRole = d.role;
-      applyRoleUI();
-      load(); loadProjects(); loadUsage();
-      if (canWrite()) loadUserList();
+      onLoginSuccess(d.role);
     } else {
       showT(d.error || 'Login failed', 'error');
     }
   } catch (e) { showT(e.message, 'error'); }
 }
+
+async function doMfaLogin() {
+  const code = document.getElementById('mfaCode').value.trim();
+  if (!code || !_pendingMfaToken) return;
+  try {
+    const r = await fetch(B + '/admin/mfa/verify', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mfaToken: _pendingMfaToken, code })
+    });
+    const d = await r.json();
+    if (r.ok && d.success) {
+      _pendingMfaToken = null;
+      onLoginSuccess(d.role);
+    } else {
+      showT(d.error || 'Invalid code', 'error');
+      document.getElementById('mfaCode').value = '';
+      document.getElementById('mfaCode').focus();
+    }
+  } catch (e) { showT(e.message, 'error'); }
+}
+
+function cancelMfa() {
+  _pendingMfaToken = null;
+  document.getElementById('loginStep2').style.display = 'none';
+  document.getElementById('loginStep1').style.display = '';
+}
+
+function onLoginSuccess(role) {
+  document.getElementById('loginOverlay').classList.remove('show');
+  adminAuthed = true;
+  userRole = role;
+  applyRoleUI();
+  load(); loadProjects(); loadUsage();
+  if (canWrite()) loadUserList();
+  resetInactivityTimer();
+}
+
+async function doLogout() {
+  await fetch(B + '/admin/logout', { method: 'POST' }).catch(() => {});
+  adminAuthed = false;
+  clearTimeout(_inactivityTimer);
+  document.getElementById('loginOverlay').classList.add('show');
+  document.getElementById('loginStep1').style.display = '';
+  document.getElementById('loginStep2').style.display = 'none';
+}
+
+// ── Auto-logout after 5 min inactivity ──────────────────────
+const INACTIVITY_MS = 5 * 60 * 1000;
+let _inactivityTimer = null;
+
+function resetInactivityTimer() {
+  clearTimeout(_inactivityTimer);
+  _inactivityTimer = setTimeout(async () => {
+    if (!adminAuthed) return;
+    await fetch(B + '/admin/logout', { method: 'POST' }).catch(() => {});
+    adminAuthed = false;
+    document.getElementById('loginOverlay').classList.add('show');
+    document.getElementById('loginStep1').style.display = '';
+    document.getElementById('loginStep2').style.display = 'none';
+    showT('已因无操作自动登出', 'success');
+  }, INACTIVITY_MS);
+}
+
+['mousemove','mousedown','keydown','touchstart','scroll','click'].forEach(evt =>
+  document.addEventListener(evt, () => { if (adminAuthed) resetInactivityTimer(); }, { passive: true })
+);
 
 document.getElementById('loginSecret').addEventListener('keydown', e => {
   if (e.key === 'Enter') doLogin();
@@ -1219,7 +1552,7 @@ async function load() {
 // ============================================================
 function renderProvGrid() {
   document.getElementById('provGrid').innerHTML = providers.map(p => `
-    <div class="prov-chip" onclick="switchToProvider('${p.name}')">
+    <div class="prov-chip" data-action="switchToProvider" data-name="${esc(p.name)}">
       <img src="/logos/${p.name}.png" alt="${esc(p.name)}">
       <span class="chip-name">${esc(p.name)}</span>
       <span class="chip-dot ${p.available ? 'on' : 'off'}"></span>
@@ -1260,13 +1593,17 @@ async function loadActivity() {
       agg[k].cost += r.cost;
     }
     const items = Object.values(agg).sort((a, b) => b.count - a.count).slice(0, 6);
-    el.innerHTML = items.map(it => `
+    el.innerHTML = items.map(it => {
+      const isSub = it.model.endsWith(':subscription');
+      const modelLabel = isSub ? it.model.slice(0, -':subscription'.length) + ' (Plan)' : it.model;
+      const costStyle = isSub ? ' style="color:rgba(0,0,0,0.3)"' : '';
+      return `
       <div class="activity-item">
         <span class="activity-dot"></span>
-        <span class="activity-text">${esc(projDisplayName(it.project))} &mdash; ${esc(it.model)} &times;${it.count}</span>
-        <span class="activity-cost">${fmtCost(it.cost, 'USD')}</span>
-      </div>
-    `).join('');
+        <span class="activity-text">${esc(projDisplayName(it.project))} &mdash; ${esc(modelLabel)} &times;${it.count}</span>
+        <span class="activity-cost"${costStyle}>${fmtCost(it.cost, 'USD')}</span>
+      </div>`;
+    }).join('');
   } catch {
     document.getElementById('activityList').innerHTML = '<div class="activity-empty">Failed to load</div>';
   }
@@ -1277,7 +1614,7 @@ async function loadActivity() {
 // ============================================================
 function renderProvTabs() {
   document.getElementById('provTabs').innerHTML = providers.map(p => `
-    <button class="prov-tab${p.name === activeProv ? ' active' : ''}" onclick="switchProv('${p.name}')">
+    <button class="prov-tab${p.name === activeProv ? ' active' : ''}" data-action="switchProv" data-name="${esc(p.name)}">
       <img src="/logos/${p.name}.png" alt="${esc(p.name)}">
       <span class="tab-name">${esc(p.name)}</span>
       <span class="tab-dot ${p.available ? 'on' : 'off'}"></span>
@@ -1316,7 +1653,7 @@ async function switchProv(name) {
           <span style="font-size:12px;font-weight:600;color:rgba(0,0,0,0.5)">API Keys</span>
           <span style="font-size:11px;color:rgba(0,0,0,0.3)">${ec}/${kc} active</span>
           <span style="flex:1"></span>
-          <button class="btn sm" onclick="event.stopPropagation();openAddKey('${esc(name)}')">+ Add</button>
+          <button class="btn sm" data-action="openAddKey" data-name="${esc(name)}" data-stop-propagation="1">+ Add</button>
         </div>
         <div id="keysPanel" class="keys-float-panel">
           <div id="keysList"></div>
@@ -1332,7 +1669,7 @@ async function switchProv(name) {
     ${keysHtml}
     ${models.length ? `<div class="model-list">
       ${models.map((m, i) => `
-        <div class="model-item${i === 0 ? ' selected' : ''}" data-id="${esc(m.id)}" onclick="selectModel('${esc(m.id)}')">
+        <div class="model-item${i === 0 ? ' selected' : ''}" data-id="${esc(m.id)}" data-action="selectModel" data-model-id="${esc(m.id)}">
           <div class="model-main">
             <div class="model-row1">
               <span class="model-id">${esc(m.id)}</span>
@@ -1488,10 +1825,10 @@ async function loadProjects() {
       modelHtml += secHtml;
       return `
         <div class="proj-item">
-          ${canWrite() ? `<button class="proj-toggle ${p.enabled ? 'on' : 'off'}" onclick="toggleProj('${safeName}', ${!p.enabled})"></button>` : ''}
+          ${canWrite() ? `<button class="proj-toggle ${p.enabled ? 'on' : 'off'}" data-action="toggleProj" data-name="${safeName}" data-enabled="${!p.enabled}"></button>` : ''}
           <div class="proj-info">
             <div class="proj-name">${safeName}</div>
-            <div class="proj-key" onclick="revealAndCopy(this, '${safeKey}')" title="Click to reveal & copy">
+            <div class="proj-key" data-action="revealAndCopy" data-key="${safeKey}" title="Click to reveal & copy">
               <svg class="key-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
               <span class="key-label">Click to reveal key</span>
             </div>
@@ -1499,9 +1836,9 @@ async function loadProjects() {
             <div class="proj-date">Created ${esc(date)}</div>
           </div>
           ${canWrite() ? `<div class="proj-acts">
-            <button class="btn sm" onclick="openEditProj('${safeName}')">Edit</button>
-            <button class="btn sm" onclick="regenProj('${safeName}')">Regen</button>
-            <button class="btn sm" onclick="delProj('${safeName}')" style="color:#ff3b30">Del</button>
+            <button class="btn sm" data-action="openEditProj" data-name="${safeName}">Edit</button>
+            <button class="btn sm" data-action="regenProj" data-name="${safeName}">Regen</button>
+            <button class="btn sm" data-action="delProj" data-name="${safeName}" style="color:#ff3b30">Del</button>
           </div>` : ''}
         </div>`;
     }).join('');
@@ -1558,7 +1895,7 @@ function removeModel(prefix, idx) {
 function renderAllowedChips(prefix) {
   const container = document.getElementById(prefix + 'ModelChips');
   container.innerHTML = allowedModelsMap[prefix].map((m, i) =>
-    `<span class="model-chip" onclick="removeModel('${prefix}',${i})" title="Click to remove">${esc(m.model)} &times;</span>`
+    `<span class="model-chip" data-action="removeModel" data-prefix="${esc(prefix)}" data-idx="${i}" title="Click to remove">${esc(m.model)} &times;</span>`
   ).join('') || '<span style="font-size:11px;color:rgba(0,0,0,0.3)">All models allowed</span>';
 }
 
@@ -1632,6 +1969,7 @@ async function openEditProj(name) {
   document.getElementById('editProjName').value = name;
   document.getElementById('editProjBudget').value = proj.maxBudgetUsd ?? '';
   document.getElementById('editProjPeriod').value = proj.budgetPeriod || '';
+  document.getElementById('editProjSubSpending').checked = !!proj.subscriptionCountsSpending;
   document.getElementById('editProjSpent').textContent = `$${(proj.budgetUsedUsd || 0).toFixed(4)}`;
   // Models tab — dropdown-based
   await loadAllModels();
@@ -1713,7 +2051,7 @@ function renderSmartCandidates(selected) {
 function renderSmartCandidateChips() {
   const container = document.getElementById('editSmartCandidates');
   container.innerHTML = smartCandidatesList.map((c, i) =>
-    `<span class="model-chip sel" style="cursor:pointer" onclick="removeSmartCandidate(${i})" title="Click to remove">${esc(c.provider)}/${esc(c.model)} &times;</span>`
+    `<span class="model-chip sel" style="cursor:pointer" data-action="removeSmartCandidate" data-idx="${i}" title="Click to remove">${esc(c.provider)}/${esc(c.model)} &times;</span>`
   ).join('') || '<span style="font-size:11px;color:rgba(0,0,0,0.3)">No candidates added</span>';
 }
 
@@ -1773,6 +2111,7 @@ async function saveEditProj() {
   const budgetVal = document.getElementById('editProjBudget').value;
   body.maxBudgetUsd = budgetVal === '' ? null : parseFloat(budgetVal);
   body.budgetPeriod = document.getElementById('editProjPeriod').value || null;
+  body.subscriptionCountsSpending = document.getElementById('editProjSubSpending').checked;
   body.allowedModels = getSelectedModels('edit');
   if (editProjResetBudget) body.resetBudget = true;
   // Security
@@ -1910,16 +2249,15 @@ async function loadProviderKeys(provider) {
       return;
     }
     el.innerHTML = keys.map((k, i) => `
-      <div class="key-row" data-kid="${esc(k.id)}"
+      <div class="key-row" data-kid="${esc(k.id)}" data-provider="${esc(provider)}" data-label="${esc(k.label)}" data-enabled="${k.enabled ? '1' : '0'}"
            style="display:flex;align-items:center;gap:8px;padding:6px 4px;border-radius:8px;font-size:12px;${!k.enabled?'opacity:0.4':''}">
-        <span style="cursor:grab;color:rgba(0,0,0,0.2);font-size:14px;touch-action:none" title="Drag to reorder"
-              onpointerdown="startKeyDrag(event,'${esc(k.id)}')">⠿</span>
+        <span class="key-drag-handle" style="cursor:grab;color:rgba(0,0,0,0.2);font-size:14px;touch-action:none" title="Drag to reorder" data-kid="${esc(k.id)}">⠿</span>
         <span style="font-weight:600;min-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(k.label)}</span>
         <span style="color:rgba(0,0,0,0.3);font-family:monospace;font-size:11px">${esc(k.keyPreview)}</span>
         ${k.project ? `<span style="display:inline-block;padding:1px 5px;border-radius:4px;font-size:10px;background:rgba(0,122,255,0.08);color:#007aff">${esc(k.project)}</span>` : '<span style="display:inline-block;padding:1px 5px;border-radius:4px;font-size:10px;background:rgba(0,0,0,0.04);color:rgba(0,0,0,0.35)">Public</span>'}
         <span style="flex:1"></span>
-        <button onclick="toggleKeyEnabled('${esc(provider)}','${esc(k.id)}',${!k.enabled})" class="btn sm" style="font-size:10px;padding:2px 6px">${k.enabled ? 'On' : 'Off'}</button>
-        <button onclick="deleteProvKey('${esc(provider)}','${esc(k.id)}','${esc(k.label)}')" class="btn sm" style="font-size:10px;padding:2px 6px;color:#ff3b30">×</button>
+        <button data-action="toggleKeyEnabled" data-provider="${esc(provider)}" data-kid="${esc(k.id)}" data-enabled="${!k.enabled}" class="btn sm" style="font-size:10px;padding:2px 6px">${k.enabled ? 'On' : 'Off'}</button>
+        <button data-action="deleteProvKey" data-provider="${esc(provider)}" data-kid="${esc(k.id)}" data-label="${esc(k.label)}" class="btn sm" style="font-size:10px;padding:2px 6px;color:#ff3b30">×</button>
       </div>
     `).join('');
   } catch { el.innerHTML = '<div style="font-size:11px;color:#ff3b30">Failed to load keys</div>'; }
@@ -1985,7 +2323,7 @@ let pkDragId = null, pkDragEl = null, pkGhost = null, pkDragItems = [], pkDragSt
 function startKeyDrag(e, id) {
   e.preventDefault();
   pkDragId = id;
-  pkDragEl = e.currentTarget.closest('.key-row');
+  pkDragEl = e.target.closest('.key-row');
 
   // Snapshot all rows and their midpoint Y for hit-testing
   pkDragItems = [...document.querySelectorAll('#keysList .key-row')].map(el => ({
@@ -2079,14 +2417,14 @@ async function loadUserList() {
       const projInfo = u.role === 'user' && u.projects?.length ? ` · ${u.projects.length} project${u.projects.length > 1 ? 's' : ''}` : '';
       return `
         <div class="proj-item">
-          <button class="proj-toggle ${u.enabled ? 'on' : 'off'}" onclick="toggleUser('${esc(u.username)}', ${!u.enabled})"></button>
+          <button class="proj-toggle ${u.enabled ? 'on' : 'off'}" data-action="toggleUser" data-name="${esc(u.username)}" data-enabled="${!u.enabled}"></button>
           <div class="proj-info">
             <div class="proj-name">${esc(u.username)} ${roleBadge}</div>
             <div class="proj-date">${u.enabled ? 'Active' : 'Disabled'}${projInfo} · Created ${new Date(u.createdAt).toLocaleDateString()}</div>
           </div>
           <div class="proj-acts">
-            <button class="btn sm" onclick="openUserModal('${esc(u.username)}')">Edit</button>
-            <button class="btn sm" onclick="deleteUser('${esc(u.username)}')" style="color:#ff3b30">Del</button>
+            <button class="btn sm" data-action="openUserModal" data-name="${esc(u.username)}">Edit</button>
+            <button class="btn sm" data-action="deleteUser" data-name="${esc(u.username)}" style="color:#ff3b30">Del</button>
           </div>
         </div>`;
     }).join('');
@@ -2097,7 +2435,7 @@ function renderUserProjectChips(selected) {
   const sel = new Set(selected || []);
   const container = document.getElementById('userProjectChips');
   container.innerHTML = projectsList.map(p =>
-    `<span class="model-chip${sel.has(p.name) ? ' sel' : ''}" data-model="${esc(p.name)}" onclick="this.classList.toggle('sel')">${esc(p.name)}</span>`
+    `<span class="model-chip${sel.has(p.name) ? ' sel' : ''}" data-model="${esc(p.name)}">${esc(p.name)}</span>`
   ).join('');
 }
 
@@ -2303,18 +2641,21 @@ function renderUsageDetail(d, currency) {
     let rows = '';
     for (const [modelKey, m] of modelEntries) {
       const cacheRate = m.inputTokens > 0 ? Math.round((m.cacheHitTokens / m.inputTokens) * 100) : 0;
+      const isSub = modelKey.endsWith(':subscription');
+      const displayModel = isSub ? esc(modelKey.slice(0, -':subscription'.length)) + ' <span style="color:rgba(0,0,0,0.3);font-size:10px;font-weight:400">Coding Plan</span>' : esc(modelKey);
+      const costDisplay = isSub ? `<span style="color:rgba(0,0,0,0.3)">${fmtCost(m.cost, currency)}</span>` : fmtCost(m.cost, currency);
       rows += `<tr>
-        <td>${esc(modelKey)}</td>
+        <td>${displayModel}</td>
         <td class="num">${m.count}</td>
         <td class="num">${fmtTokens(m.inputTokens)}${cacheRate > 0 ? ' <span style="color:#34c759;font-size:10px">(' + cacheRate + '%hit)</span>' : ''}</td>
         <td class="num">${fmtTokens(m.outputTokens)}</td>
-        <td class="num cost-cell">${fmtCost(m.cost, currency)}</td>
+        <td class="num cost-cell">${costDisplay}</td>
       </tr>`;
     }
 
     groups += `
       <div class="usage-proj-group">
-        <div class="usage-proj-header" onclick="toggleUsageProj('${esc(projName)}')">
+        <div class="usage-proj-header" data-action="toggleUsageProj" data-name="${esc(projName)}">
           <span class="usage-proj-arrow${isOpen ? ' open' : ''}" id="arrow_${esc(projName)}">&#9654;</span>
           <span class="usage-proj-name">${esc(projDisplayName(projName))}</span>
           <div class="usage-proj-summary">
@@ -2546,8 +2887,11 @@ function renderBarChart(summary, currency) {
     const [modelKey, cost] = sorted[i];
     const rowY = padT + i * (rowH + gap);
     const bw = Math.max(4, (cost / maxCost) * maxBarW);
-    const color = getProviderColor(modelKey);
-    const shortName = modelKey.length > maxTrunc ? modelKey.slice(0, maxTrunc - 2) + '..' : modelKey;
+    const isSub = modelKey.endsWith(':subscription');
+    const displayKey = isSub ? modelKey.slice(0, -':subscription'.length) + ' (Plan)' : modelKey;
+    const color = isSub ? 'rgba(0,0,0,0.2)' : getProviderColor(modelKey);
+    const costColor = isSub ? 'rgba(0,0,0,0.3)' : '#ff9500';
+    const shortName = displayKey.length > maxTrunc ? displayKey.slice(0, maxTrunc - 2) + '..' : displayKey;
 
     if (isMobile) {
       // Label row above bar
@@ -2556,7 +2900,7 @@ function renderBarChart(summary, currency) {
       ctx.textAlign = 'left';
       ctx.fillText(shortName, padL, rowY + fontSize);
 
-      ctx.fillStyle = '#ff9500';
+      ctx.fillStyle = costColor;
       ctx.font = "bold " + fontSize + "px 'SF Pro Display', -apple-system, sans-serif";
       ctx.textAlign = 'right';
       ctx.fillText(fmtCost(cost, currency), w - padR, rowY + fontSize);
@@ -2574,9 +2918,9 @@ function renderBarChart(summary, currency) {
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
       ctx.font = fontSize + "px 'SF Mono', Menlo, 'SF Pro Display', -apple-system, sans-serif";
       ctx.textAlign = 'left';
-      ctx.fillText(modelKey, padL, rowY + fontSize);
+      ctx.fillText(displayKey, padL, rowY + fontSize);
 
-      ctx.fillStyle = '#ff9500';
+      ctx.fillStyle = costColor;
       ctx.font = "bold " + fontSize + "px 'SF Pro Display', -apple-system, sans-serif";
       ctx.textAlign = 'right';
       ctx.fillText(fmtCost(cost, currency), w - padR, rowY + fontSize);
@@ -2671,6 +3015,96 @@ window.addEventListener('resize', () => {
   setupChartTooltip('trendChart', 'trendTip');
   setupChartTooltip('barChart', 'barTip');
 })();
+
+// ============================================================
+// Delegated Event Listeners (replaces all inline onclick= in templates)
+// ============================================================
+
+// Provider grid — switchToProvider
+document.getElementById('provGrid').addEventListener('click', e => {
+  const chip = e.target.closest('[data-action="switchToProvider"]');
+  if (chip) switchToProvider(chip.dataset.name);
+});
+
+// Provider tabs — switchProv
+document.getElementById('provTabs').addEventListener('click', e => {
+  const btn = e.target.closest('[data-action="switchProv"]');
+  if (btn) switchProv(btn.dataset.name);
+});
+
+// Provider panel — openAddKey, selectModel, toggleKeyEnabled, deleteProvKey
+document.getElementById('provPanel').addEventListener('click', e => {
+  const addKeyBtn = e.target.closest('[data-action="openAddKey"]');
+  if (addKeyBtn) { e.stopPropagation(); openAddKey(addKeyBtn.dataset.name); return; }
+  const modelItem = e.target.closest('[data-action="selectModel"]');
+  if (modelItem) { selectModel(modelItem.dataset.modelId); return; }
+  const toggleBtn = e.target.closest('[data-action="toggleKeyEnabled"]');
+  if (toggleBtn) { toggleKeyEnabled(toggleBtn.dataset.provider, toggleBtn.dataset.kid, toggleBtn.dataset.enabled === 'true'); return; }
+  const delBtn = e.target.closest('[data-action="deleteProvKey"]');
+  if (delBtn) { deleteProvKey(delBtn.dataset.provider, delBtn.dataset.kid, delBtn.dataset.label); return; }
+});
+
+// Provider panel — drag handles (pointerdown, not click)
+document.getElementById('provPanel').addEventListener('pointerdown', e => {
+  const handle = e.target.closest('.key-drag-handle');
+  if (handle) startKeyDrag(e, handle.dataset.kid);
+});
+
+// Projects list — toggleProj, revealAndCopy, openEditProj, regenProj, delProj
+document.getElementById('projList').addEventListener('click', e => {
+  const toggleBtn = e.target.closest('[data-action="toggleProj"]');
+  if (toggleBtn) { toggleProj(toggleBtn.dataset.name, toggleBtn.dataset.enabled === 'true'); return; }
+  const revealEl = e.target.closest('[data-action="revealAndCopy"]');
+  if (revealEl) { revealAndCopy(revealEl, revealEl.dataset.key); return; }
+  const editBtn = e.target.closest('[data-action="openEditProj"]');
+  if (editBtn) { openEditProj(editBtn.dataset.name); return; }
+  const regenBtn = e.target.closest('[data-action="regenProj"]');
+  if (regenBtn) { regenProj(regenBtn.dataset.name); return; }
+  const delBtn = e.target.closest('[data-action="delProj"]');
+  if (delBtn) { delProj(delBtn.dataset.name); return; }
+});
+
+// Users list — toggleUser, openUserModal, deleteUser
+document.getElementById('userList').addEventListener('click', e => {
+  const toggleBtn = e.target.closest('[data-action="toggleUser"]');
+  if (toggleBtn) { toggleUser(toggleBtn.dataset.name, toggleBtn.dataset.enabled === 'true'); return; }
+  const editBtn = e.target.closest('[data-action="openUserModal"]');
+  if (editBtn) { openUserModal(editBtn.dataset.name); return; }
+  const delBtn = e.target.closest('[data-action="deleteUser"]');
+  if (delBtn) { deleteUser(delBtn.dataset.name); return; }
+});
+
+// Usage body — toggleUsageProj
+document.getElementById('usageBody').addEventListener('click', e => {
+  const header = e.target.closest('[data-action="toggleUsageProj"]');
+  if (header) toggleUsageProj(header.dataset.name);
+});
+
+// Settings modules list — toggleModule
+document.getElementById('settingsModuleList').addEventListener('click', e => {
+  const btn = e.target.closest('[data-action="toggleModule"]');
+  if (btn) toggleModule(btn.dataset.module);
+});
+
+// Model chips (proj + edit) — removeModel
+['projModelChips', 'editModelChips'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('click', e => {
+    const btn = e.target.closest('[data-action="removeModel"]');
+    if (btn) removeModel(btn.dataset.prefix, parseInt(btn.dataset.idx));
+  });
+});
+
+// Smart candidate chips — removeSmartCandidate
+document.getElementById('editSmartCandidates').addEventListener('click', e => {
+  const btn = e.target.closest('[data-action="removeSmartCandidate"]');
+  if (btn) removeSmartCandidate(parseInt(btn.dataset.idx));
+});
+
+// User project chips — toggle sel
+document.getElementById('userProjectChips').addEventListener('click', e => {
+  e.target.closest('.model-chip')?.classList.toggle('sel');
+});
 
 setInterval(load, 30000);
 setInterval(() => {

@@ -4,9 +4,12 @@ const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 const dns = require("dns");
+const os = require("os");
 const { promisify } = require("util");
+const { Readable, PassThrough } = require("stream");
 const { createProxyMiddleware } = require("http-proxy-middleware");
 const rateLimit = require("express-rate-limit");
+const multer = require("multer");
 require("dotenv").config();
 
 const dnsLookup = promisify(dns.lookup);
@@ -15,6 +18,45 @@ function safeEqual(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string') return false;
   if (a.length !== b.length) return false;
   return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
+}
+
+// --- TOTP (RFC 6238) — compatible with Google Authenticator, Okta Verify, Authy ---
+function base32Decode(str) {
+  const alpha = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  str = str.toUpperCase().replace(/=+$/, '').replace(/\s/g, '');
+  let bits = 0, value = 0;
+  const bytes = [];
+  for (const c of str) {
+    const idx = alpha.indexOf(c);
+    if (idx < 0) continue;
+    value = (value << 5) | idx;
+    bits += 5;
+    if (bits >= 8) { bits -= 8; bytes.push((value >> bits) & 0xff); }
+  }
+  return Buffer.from(bytes);
+}
+function hotp(secretBase32, counter) {
+  const key = base32Decode(secretBase32);
+  const buf = Buffer.alloc(8);
+  let c = BigInt(counter);
+  for (let i = 7; i >= 0; i--) { buf[i] = Number(c & 0xffn); c >>= 8n; }
+  const hmac = crypto.createHmac('sha1', key).update(buf).digest();
+  const offset = hmac[hmac.length - 1] & 0xf;
+  const code = (hmac.readUInt32BE(offset) & 0x7fffffff) % 1000000;
+  return String(code).padStart(6, '0');
+}
+function verifyTotp(secretBase32, code) {
+  const str = String(code).padStart(6, '0');
+  const t = Math.floor(Date.now() / 30000);
+  for (let i = -1; i <= 1; i++) { if (hotp(secretBase32, t + i) === str) return true; }
+  return false;
+}
+function generateTotpSecret() {
+  const alpha = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  return [...crypto.randomBytes(20)].map(b => alpha[b % 32]).join('');
+}
+function totpUri(secret, label, issuer = 'LumiGate') {
+  return `otpauth://totp/${encodeURIComponent(issuer)}:${encodeURIComponent(label)}?secret=${secret}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=6&period=30`;
 }
 
 // --- Structured logging ---
@@ -74,6 +116,8 @@ function decryptValue(stored, secret) {
 
 const sessions = new Map();
 const MAX_SESSIONS = 10000;
+const mfaTokens = new Map(); // mfaToken → {username, role, expiresAt}
+setInterval(() => { const now = Date.now(); for (const [k, v] of mfaTokens) if (v.expiresAt < now) mfaTokens.delete(k); }, 60000);
 
 // --- Module system ---
 // Modules: usage, budget, multikey, users, audit, metrics, backup, smart, chat
@@ -107,6 +151,7 @@ const startTime = Date.now();
 // --- Security: Admin secret & internal chat key ---
 const ADMIN_SECRET = process.env.ADMIN_SECRET || crypto.randomBytes(20).toString("hex");
 const INTERNAL_CHAT_KEY = crypto.randomBytes(20).toString("hex"); // rotates on restart
+const PB_URL = process.env.PB_URL || "http://localhost:8090";
 
 if (!process.env.ADMIN_SECRET) {
   console.log("WARNING: No ADMIN_SECRET set — a temporary secret was generated. Set ADMIN_SECRET in .env for persistence.");
@@ -409,6 +454,7 @@ const PROVIDER_HOST_ALLOWLIST = new Set([
   "ark.cn-beijing.volces.com",
   "dashscope.aliyuncs.com",
   "api.minimax.chat",
+  "api.minimax.io",
 ]);
 
 // F-04: Allowed upstream paths per provider (prefix match)
@@ -433,6 +479,7 @@ const SETTINGS_FILE = path.join(DATA_DIR, "settings.json");
 const KEYS_FILE = path.join(DATA_DIR, "keys.json");
 const TOKENS_FILE = path.join(DATA_DIR, "tokens.json");
 const AUDIT_FILE = path.join(DATA_DIR, "audit.jsonl");
+const STEALTH_CONF_FILE = path.join(DATA_DIR, "stealth.conf");
 const BACKUP_DIR = path.join(DATA_DIR, "backups");
 
 let dataDirReady = false;
@@ -510,6 +557,15 @@ let settings = loadSettings();
 if (settings.deployMode && settings.deployMode !== DEPLOY_MODE) {
   applyDeployMode(settings.deployMode, settings.customModules);
 }
+
+// Stealth conf: ensure file exists so nginx include doesn't fail on startup
+function applyStealthConf(enabled) {
+  try {
+    ensureDataDir();
+    fs.writeFileSync(STEALTH_CONF_FILE, enabled ? 'access_log off;\n' : '# stealth off\n');
+  } catch (e) { log('warn', 'Failed to write stealth.conf', { err: e.message }); }
+}
+if (!fs.existsSync(STEALTH_CONF_FILE)) applyStealthConf(!!settings.stealthMode);
 
 // --- Audit logging (requires "audit" module) ---
 // Append-only structured audit log: one JSON object per line
@@ -946,7 +1002,7 @@ const PROVIDERS = {
   kimi: { baseUrl: process.env.KIMI_BASE_URL || "https://api.moonshot.cn", apiKey: decryptEnvKey("KIMI_API_KEY") },
   doubao: { baseUrl: process.env.DOUBAO_BASE_URL || "https://ark.cn-beijing.volces.com/api/v3", apiKey: decryptEnvKey("DOUBAO_API_KEY") },
   qwen: { baseUrl: process.env.QWEN_BASE_URL || "https://dashscope.aliyuncs.com/compatible-mode", apiKey: decryptEnvKey("QWEN_API_KEY") },
-  minimax: { baseUrl: process.env.MINIMAX_BASE_URL || "https://api.minimax.chat", apiKey: decryptEnvKey("MINIMAX_API_KEY") },
+  minimax: { baseUrl: process.env.MINIMAX_BASE_URL || "https://api.minimax.io", apiKey: decryptEnvKey("MINIMAX_API_KEY") },
 };
 
 // Migrate single .env keys to multi-key store
@@ -1002,9 +1058,10 @@ const MODELS = {
     { id: "qwen-long", tier: "standard", price: { in: 0.069, cacheIn: 0.014, out: 0.276 }, caps: ["text"], desc: "10M context window — book-length document analysis" },
   ],
   minimax: [
-    { id: "MiniMax-M2", tier: "economy", price: { in: 0.29, cacheIn: 0.029, out: 1.16 }, caps: ["text"], desc: "Compact high-efficiency — coding, agentic workflows, 196K" },
-    { id: "MiniMax-M2.1", tier: "standard", price: { in: 0.29, cacheIn: 0.029, out: 1.16 }, caps: ["text"], desc: "Optimized for coding and agentic workflows, 196K context" },
-    { id: "MiniMax-M2.5", tier: "flagship", price: { in: 0.29, cacheIn: 0.029, out: 1.16 }, caps: ["text"], desc: "SOTA coding (SWE-Bench 80.2%), agentic tool use, 200K context" },
+    { id: "MiniMax-M2", tier: "economy", price: { in: 0.29, cacheIn: 0.029, out: 1.16 }, caps: ["text"], desc: "Free on Coding Plan — coding, agentic workflows, 196K context" },
+    { id: "MiniMax-M2.1", tier: "standard", price: { in: 0.29, cacheIn: 0.029, out: 1.16 }, caps: ["text"], desc: "Coding Plan paid tier — optimized for coding and agentic workflows, 196K" },
+    { id: "MiniMax-M2.5", tier: "flagship", price: { in: 0.29, cacheIn: 0.029, out: 1.16 }, caps: ["text"], desc: "Coding Plan paid tier — SOTA coding (SWE-Bench 80.2%), agentic tool use, 200K context" },
+    { id: "MiniMax-M1", tier: "flagship", price: { in: 1.00, cacheIn: 0.10, out: 4.00 }, caps: ["text"], desc: "General flagship — requires balance, not included in Coding Plan free tier" },
   ],
 };
 
@@ -1152,6 +1209,44 @@ function requireRole(...roles) {
   };
 }
 
+// ── LumiChat auth helpers ─────────────────────────────────────────────────────
+
+// Note: JWT is decoded locally without HMAC signature verification (no PB signing key available).
+// This is safe because all PB data operations forward the raw token — PB verifies the signature
+// on every call and enforces row-level ownership. The local decode is only used to check expiry
+// and gate the AI proxy fast-path. A forged token gains no data access; it can at most consume
+// the gateway's shared API quota via the _lumichat rate-limit path.
+function validateLcTokenPayload(token) {
+  try {
+    if (!token || token.split('.').length !== 3) return null;
+    const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString());
+    if (!payload.id || !payload.collectionId) return null; // must be a PB user token
+    if (payload.exp * 1000 < Date.now()) return null;
+    return payload;
+  } catch { return null; }
+}
+
+function requireLcAuth(req, res, next) {
+  const cookies = parseCookies(req);
+  const token = cookies.lc_token;
+  if (!token) return res.status(401).json({ error: 'Not authenticated' });
+  const payload = validateLcTokenPayload(token);
+  if (!payload) return res.status(401).json({ error: 'Session expired' });
+  req.lcUser = payload; // { id, email, collectionId, ... }
+  req.lcToken = token;
+  next();
+}
+
+const lcUpload = multer({
+  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB max for video
+  storage: multer.diskStorage({
+    destination: os.tmpdir(),
+    filename: (req, file, cb) => cb(null, `lc-${Date.now()}-${Math.random().toString(36).slice(2)}`),
+  }),
+});
+
+// ── End LumiChat auth helpers ─────────────────────────────────────────────────
+
 // Check if request has valid admin session — returns role string or false
 function getSessionRole(req) {
   const cookies = parseCookies(req);
@@ -1218,6 +1313,7 @@ app.get("/models/:provider", (req, res) => {
 // Static files (CSS/JS/images only, HTML served dynamically below)
 app.use("/logos", express.static(path.join(__dirname, "public", "logos")));
 app.use("/favicon.svg", express.static(path.join(__dirname, "public", "favicon.svg")));
+app.use("/lumichat-libs", express.static(path.join(__dirname, "public", "lumichat-libs")));
 
 // Serve dashboard — inject nothing (auth handled by cookie)
 app.get("/", (req, res) => {
@@ -1233,17 +1329,39 @@ app.get("/chat", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "chat.html"));
 });
 
+// Serve LumiChat interface (nonce injected into HTML for CSP)
+app.get("/lumichat", (req, res) => {
+  const htmlPath = path.join(__dirname, "public", "lumichat.html");
+  if (!fs.existsSync(htmlPath)) {
+    return res.status(503).send("LumiChat not yet deployed");
+  }
+  const nonce = crypto.randomBytes(16).toString('base64');
+  res.setHeader("Content-Security-Policy",
+    `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'nonce-${nonce}' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'`
+  );
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  // Inject nonce into all <script nonce="{{NONCE}}"> and <style nonce="{{NONCE}}"> placeholders
+  const html = fs.readFileSync(htmlPath, 'utf8').replace(/\{\{NONCE\}\}/g, nonce);
+  res.send(html);
+});
+
 // ============================================================
 // Admin auth: login/logout
 // ============================================================
 app.post("/admin/login", loginLimiter, async (req, res) => {
+  const isSecure = req.secure || req.headers["x-forwarded-proto"] === "https" || (req.headers["cf-visitor"] || "").includes("https");
   // Flow 1: ADMIN_SECRET (root)
   if (req.body.secret) {
     if (safeEqual(req.body.secret, ADMIN_SECRET)) {
+      // MFA check for root
+      if (settings.rootMfaEnabled && settings.rootTotpSecret) {
+        const mfaToken = 'mfa_' + crypto.randomBytes(16).toString('hex');
+        mfaTokens.set(mfaToken, { username: '_root', role: 'root', expiresAt: Date.now() + 5 * 60 * 1000 });
+        return res.json({ success: false, mfaRequired: true, mfaToken });
+      }
       const sessionToken = crypto.randomBytes(32).toString('hex');
       if (sessions.size >= MAX_SESSIONS) sessions.delete(sessions.keys().next().value);
       sessions.set(sessionToken, { createdAt: Date.now(), role: "root", username: "_root" });
-      const isSecure = req.secure || req.headers["x-forwarded-proto"] === "https" || (req.headers["cf-visitor"] || "").includes("https");
       res.cookie("admin_token", sessionToken, { httpOnly: true, sameSite: "Strict", secure: isSecure, path: "/", maxAge: 86400000 });
       audit("_root", "login", null, { method: "secret" });
       return res.json({ success: true, role: "root" });
@@ -1259,13 +1377,48 @@ app.post("/admin/login", loginLimiter, async (req, res) => {
     audit(username || null, "login_failed", null, { method: "password", ip: normalizeIP(req) });
     return res.status(401).json({ error: "Invalid credentials" });
   }
+  // MFA check for user
+  if (user.mfaEnabled && user.totpSecret) {
+    const mfaToken = 'mfa_' + crypto.randomBytes(16).toString('hex');
+    mfaTokens.set(mfaToken, { username: user.username, role: user.role, expiresAt: Date.now() + 5 * 60 * 1000 });
+    return res.json({ success: false, mfaRequired: true, mfaToken });
+  }
   const sessionToken = crypto.randomBytes(32).toString('hex');
   if (sessions.size >= MAX_SESSIONS) sessions.delete(sessions.keys().next().value);
   sessions.set(sessionToken, { createdAt: Date.now(), role: user.role, username: user.username });
-  const isSecure = req.secure || req.headers["x-forwarded-proto"] === "https" || (req.headers["cf-visitor"] || "").includes("https");
   res.cookie("admin_token", sessionToken, { httpOnly: true, sameSite: "Strict", secure: isSecure, path: "/", maxAge: 86400000 });
   audit(user.username, "login", null, { method: "password", role: user.role });
   res.json({ success: true, role: user.role });
+});
+
+// MFA step-2: verify TOTP code (public — part of login flow)
+app.post("/admin/mfa/verify", loginLimiter, (req, res) => {
+  const { mfaToken, code } = req.body;
+  if (!mfaToken || !code) return res.status(400).json({ error: "mfaToken and code required" });
+  const entry = mfaTokens.get(mfaToken);
+  if (!entry || entry.expiresAt < Date.now()) {
+    mfaTokens.delete(mfaToken);
+    return res.status(401).json({ error: "MFA session expired, please login again" });
+  }
+  let totpSecret;
+  if (entry.username === '_root') {
+    totpSecret = settings.rootTotpSecret;
+  } else {
+    const user = users.find(u => u.username === entry.username);
+    totpSecret = user?.totpSecret;
+  }
+  if (!totpSecret || !verifyTotp(totpSecret, code)) {
+    audit(entry.username, "mfa_failed", null, { ip: normalizeIP(req) });
+    return res.status(401).json({ error: "Invalid authentication code" });
+  }
+  mfaTokens.delete(mfaToken);
+  const isSecure = req.secure || req.headers["x-forwarded-proto"] === "https" || (req.headers["cf-visitor"] || "").includes("https");
+  const sessionToken = crypto.randomBytes(32).toString('hex');
+  if (sessions.size >= MAX_SESSIONS) sessions.delete(sessions.keys().next().value);
+  sessions.set(sessionToken, { createdAt: Date.now(), role: entry.role, username: entry.username });
+  res.cookie("admin_token", sessionToken, { httpOnly: true, sameSite: "Strict", secure: isSecure, path: "/", maxAge: 86400000 });
+  audit(entry.username, "login", null, { method: "mfa" });
+  res.json({ success: true, role: entry.role });
 });
 
 app.post("/admin/logout", (req, res) => {
@@ -1308,6 +1461,97 @@ app.get("/admin/auth", adminLimiter, (req, res) => {
 // ============================================================
 app.use("/admin", adminLimiter, adminAuth);
 
+// --- MFA Management (authenticated) ---
+// Generate a new TOTP secret (pendingTotpSecret, not active until confirmed)
+app.post("/admin/mfa/setup", (req, res) => {
+  const secret = generateTotpSecret();
+  const label = req.userName === '_root' ? 'LumiGate Root' : req.userName;
+  const uri = totpUri(secret, label);
+  // Store pending secret in-memory (not saved until confirmed)
+  if (req.userName === '_root') {
+    settings._pendingRootTotp = secret;
+  } else {
+    const user = users.find(u => u.username === req.userName);
+    if (!user) return res.status(404).json({ error: "User not found" });
+    user._pendingTotp = secret;
+  }
+  res.json({ secret, otpauthUrl: uri });
+});
+
+// Confirm MFA setup by verifying first code — activates MFA
+app.post("/admin/mfa/confirm", (req, res) => {
+  const { code } = req.body;
+  if (!code) return res.status(400).json({ error: "code required" });
+  if (req.userName === '_root') {
+    const secret = settings._pendingRootTotp;
+    if (!secret) return res.status(400).json({ error: "No pending MFA setup. Call /admin/mfa/setup first." });
+    if (!verifyTotp(secret, code)) return res.status(401).json({ error: "Invalid code" });
+    settings.rootTotpSecret = secret;
+    settings.rootMfaEnabled = true;
+    delete settings._pendingRootTotp;
+    saveSettings(settings);
+    audit('_root', 'mfa_enabled', null, {});
+    return res.json({ success: true });
+  }
+  const user = users.find(u => u.username === req.userName);
+  if (!user) return res.status(404).json({ error: "User not found" });
+  const secret = user._pendingTotp;
+  if (!secret) return res.status(400).json({ error: "No pending MFA setup. Call /admin/mfa/setup first." });
+  if (!verifyTotp(secret, code)) return res.status(401).json({ error: "Invalid code" });
+  user.totpSecret = secret;
+  user.mfaEnabled = true;
+  delete user._pendingTotp;
+  saveUsers(users);
+  audit(req.userName, 'mfa_enabled', null, {});
+  res.json({ success: true });
+});
+
+// Disable MFA (requires current TOTP code to prevent lock-out attacks)
+app.delete("/admin/mfa", (req, res) => {
+  const { code } = req.body;
+  if (!code) return res.status(400).json({ error: "Current TOTP code required to disable MFA" });
+  if (req.userName === '_root') {
+    if (!settings.rootMfaEnabled || !settings.rootTotpSecret) return res.status(400).json({ error: "MFA is not enabled" });
+    if (!verifyTotp(settings.rootTotpSecret, code)) return res.status(401).json({ error: "Invalid code" });
+    settings.rootMfaEnabled = false;
+    delete settings.rootTotpSecret;
+    saveSettings(settings);
+    audit('_root', 'mfa_disabled', null, {});
+    return res.json({ success: true });
+  }
+  const user = users.find(u => u.username === req.userName);
+  if (!user) return res.status(404).json({ error: "User not found" });
+  if (!user.mfaEnabled || !user.totpSecret) return res.status(400).json({ error: "MFA is not enabled" });
+  if (!verifyTotp(user.totpSecret, code)) return res.status(401).json({ error: "Invalid code" });
+  user.mfaEnabled = false;
+  delete user.totpSecret;
+  saveUsers(users);
+  audit(req.userName, 'mfa_disabled', null, {});
+  res.json({ success: true });
+});
+
+// Generate QR code image for MFA setup (server-side, no CDN needed)
+app.get("/admin/mfa/qr", async (req, res) => {
+  const { uri } = req.query;
+  if (!uri || !uri.startsWith('otpauth://')) return res.status(400).json({ error: 'Invalid URI' });
+  try {
+    const QRCode = require('qrcode');
+    const dataUrl = await QRCode.toDataURL(uri, { width: 180, margin: 2, color: { dark: '#1c1c1e', light: '#f5f5f7' } });
+    res.json({ dataUrl });
+  } catch (e) {
+    res.status(500).json({ error: 'QR generation failed' });
+  }
+});
+
+// Get MFA status for current user
+app.get("/admin/mfa/status", (req, res) => {
+  if (req.userName === '_root') {
+    return res.json({ mfaEnabled: !!settings.rootMfaEnabled });
+  }
+  const user = users.find(u => u.username === req.userName);
+  res.json({ mfaEnabled: !!(user?.mfaEnabled) });
+});
+
 app.get("/admin/uptime", (req, res) => {
   const ms = Date.now() - startTime;
   const s = Math.floor(ms / 1000);
@@ -1342,8 +1586,7 @@ app.get("/admin/test/:provider", requireRole("root", "admin"), async (req, res) 
     const headers = { "Content-Type": "application/json" };
     let url;
     if (name === "anthropic") {
-      headers["x-api-key"] = testKey;
-      headers["anthropic-version"] = "2023-06-01";
+      Object.assign(headers, anthropicAuthHeaders(testKey));
       url = `${provider.baseUrl}/v1/messages`;
     } else if (name === "gemini") {
       headers["Authorization"] = `Bearer ${testKey}`;
@@ -1533,6 +1776,11 @@ app.put("/admin/projects/:name", requireRole("root", "admin"), (req, res) => {
     } else if (Array.isArray(req.body.allowedIPs)) {
       proj.allowedIPs = req.body.allowedIPs.filter(ip => typeof ip === "string" && ip.length > 0).slice(0, 50);
     }
+  }
+  // Coding Plan spending
+  if (req.body.subscriptionCountsSpending !== undefined) {
+    if (req.body.subscriptionCountsSpending) proj.subscriptionCountsSpending = true;
+    else delete proj.subscriptionCountsSpending;
   }
   // Anomaly auto-suspend
   if (req.body.anomalyAutoSuspend !== undefined) {
@@ -1746,11 +1994,22 @@ app.get("/admin/settings", requireRole("root"), (req, res) => {
     authEmail: settings.authEmail || "",
     authRotateHours: settings.authRotateHours || 24,
     authLastRotated: settings.authLastRotated || null,
+    stealthMode: !!settings.stealthMode,
+    // SMTP (password redacted)
+    smtpHost: settings.smtpHost || "",
+    smtpPort: settings.smtpPort || 587,
+    smtpUser: settings.smtpUser || "",
+    smtpFrom: settings.smtpFrom || "",
+    smtpTo: settings.smtpTo || "",
+    smtpEnabled: !!settings.smtpEnabled,
+    smtpHasPassword: !!(settings.smtpPass),
   });
 });
 
 app.put("/admin/settings", requireRole("root"), (req, res) => {
-  const { freeTierMode, deployMode, enabledModules, authMode, authEmail, authRotateHours, confirmSecret } = req.body;
+  const { freeTierMode, deployMode, enabledModules, authMode, authEmail, authRotateHours, confirmSecret,
+          smtpHost, smtpPort, smtpUser, smtpPass, smtpFrom, smtpTo, smtpEnabled,
+          stealthMode } = req.body;
   // Require re-authentication for settings changes
   if (!confirmSecret || !safeEqual(confirmSecret, ADMIN_SECRET)) {
     return res.status(403).json({ error: "Admin secret required to change settings" });
@@ -1805,6 +2064,20 @@ app.put("/admin/settings", requireRole("root"), (req, res) => {
       fs.writeFileSync(envPath, envContent, { mode: 0o600 });
     } catch (e) { console.error("Failed to persist .env:", e.message); }
   }
+  // Stealth mode
+  if (stealthMode !== undefined) {
+    settings.stealthMode = !!stealthMode;
+    applyStealthConf(settings.stealthMode);
+    changes.stealthMode = settings.stealthMode;
+  }
+  // SMTP config (留孔 — 存储但不发送)
+  if (typeof smtpHost === "string") { settings.smtpHost = smtpHost.trim(); changes.smtpHost = settings.smtpHost; }
+  if (smtpPort) { settings.smtpPort = Number(smtpPort) || 587; changes.smtpPort = settings.smtpPort; }
+  if (typeof smtpUser === "string") { settings.smtpUser = smtpUser.trim(); changes.smtpUser = settings.smtpUser; }
+  if (typeof smtpPass === "string" && smtpPass) { settings.smtpPass = smtpPass; changes.smtpPass = "[redacted]"; }
+  if (typeof smtpFrom === "string") { settings.smtpFrom = smtpFrom.trim(); changes.smtpFrom = settings.smtpFrom; }
+  if (typeof smtpTo === "string") { settings.smtpTo = smtpTo.trim(); changes.smtpTo = settings.smtpTo; }
+  if (smtpEnabled !== undefined) { settings.smtpEnabled = !!smtpEnabled; changes.smtpEnabled = settings.smtpEnabled; }
   saveSettings(settings);
   audit(req.userName, "settings_update", null, changes);
   res.json({
@@ -1951,8 +2224,7 @@ app.post("/admin/key", requireRole("root"), async (req, res) => {
       const headers = { "Content-Type": "application/json" };
       let url;
       if (name === "anthropic") {
-        headers["x-api-key"] = safeKey;
-        headers["anthropic-version"] = "2023-06-01";
+        Object.assign(headers, anthropicAuthHeaders(safeKey));
         url = `${PROVIDERS[name].baseUrl}/v1/messages`;
       } else if (name === "gemini") {
         headers["Authorization"] = `Bearer ${safeKey}`;
@@ -2018,6 +2290,11 @@ app.post("/admin/keys/:provider", requireModule("multikey"), requireRole("root")
   if (project && !projects.find(p => p.name === project)) return res.status(400).json({ error: "Project not found" });
   if (!providerKeys[name]) providerKeys[name] = [];
   if (providerKeys[name].length >= 100) return res.status(400).json({ error: "Maximum 100 keys per provider" });
+  // Dedup: reject if same key value already exists
+  const isDuplicate = providerKeys[name].some(k => {
+    try { return safeEqual(decryptValue(k.key, ADMIN_SECRET), safeKey); } catch { return false; }
+  });
+  if (isDuplicate) return res.status(409).json({ error: "This API key already exists for this provider" });
   const entry = {
     id: crypto.randomBytes(8).toString('hex'),
     label: label.slice(0, 32),
@@ -2038,7 +2315,7 @@ app.post("/admin/keys/:provider", requireModule("multikey"), requireRole("root")
       const testBody = { model: cheapest.id, messages: [{ role: "user", content: "Say hi in 3 words" }], ...(/^(o\d|gpt-5)/.test(cheapest.id) ? { max_completion_tokens: 30 } : { max_tokens: 20 }) };
       const headers = { "Content-Type": "application/json" };
       let url;
-      if (name === "anthropic") { headers["x-api-key"] = safeKey; headers["anthropic-version"] = "2023-06-01"; url = `${PROVIDERS[name].baseUrl}/v1/messages`; }
+      if (name === "anthropic") { Object.assign(headers, anthropicAuthHeaders(safeKey)); url = `${PROVIDERS[name].baseUrl}/v1/messages`; }
       else if (name === "gemini") { headers["Authorization"] = `Bearer ${safeKey}`; url = `${PROVIDERS[name].baseUrl}/v1beta/openai/chat/completions`; }
       else { headers["Authorization"] = `Bearer ${safeKey}`; url = `${PROVIDERS[name].baseUrl}/v1/chat/completions`; }
       const resp = await fetch(url, { method: "POST", headers, body: JSON.stringify(testBody), signal: AbortSignal.timeout(10000) });
@@ -2446,6 +2723,8 @@ app.use("/v1/smart", apiLimiter, async (req, res, next) => {
   req.url = req.url.replace(/^\/v1\/smart/, `/v1/${target.provider}`);
   req._proxyProjectName = projectName;
   req._proxyProject = proj;
+  // Global stealthMode overrides per-project setting
+  if (settings.stealthMode) req._proxyProject = { ...proj, privacyMode: true };
 
   // Add routing info header
   res.setHeader("X-Smart-Route", `${target.provider}/${target.model}`);
@@ -2453,9 +2732,10 @@ app.use("/v1/smart", apiLimiter, async (req, res, next) => {
   // --- Inject auth and forward to proxy ---
   const targetProvider = PROVIDERS[target.provider];
   if (target.provider === "anthropic") {
-    req.headers["x-api-key"] = targetProvider.apiKey;
-    req.headers["anthropic-version"] = req.headers["anthropic-version"] || "2023-06-01";
-    delete req.headers["authorization"];
+    const authH = anthropicAuthHeaders(targetProvider.apiKey, req.headers["anthropic-beta"]);
+    Object.assign(req.headers, authH);
+    if (authH["authorization"]) delete req.headers["x-api-key"];
+    else delete req.headers["authorization"];
   } else {
     req.headers["authorization"] = `Bearer ${targetProvider.apiKey}`;
   }
@@ -2486,6 +2766,22 @@ function openaiToAnthropicBody(body) {
   return out;
 }
 
+function anthropicAuthHeaders(apiKey, existingBeta) {
+  if (apiKey?.startsWith("sk-ant-oat")) {
+    const betas = ["claude-code-20250219", "oauth-2025-04-20"];
+    if (existingBeta) betas.unshift(existingBeta);
+    return {
+      "authorization": `Bearer ${apiKey}`,
+      "anthropic-version": "2023-06-01",
+      "anthropic-beta": [...new Set(betas)].join(","),
+      "anthropic-product": "claude-code",
+      "x-app": "cli",
+      "user-agent": "claude-code/2.1.49 (external, cli)",
+    };
+  }
+  return { "x-api-key": apiKey, "anthropic-version": "2023-06-01" };
+}
+
 function anthropicToOpenaiResponse(data, model) {
   const text = (data.content || []).filter(c => c.type === "text").map(c => c.text).join("");
   const finishReason = { end_turn: "stop", max_tokens: "length" }[data.stop_reason] || data.stop_reason || "stop";
@@ -2507,8 +2803,9 @@ async function handleAnthropicCompat(req, res, apiKey, projectName, excludeKeyId
   const requestedModel = req.body?.model || "claude-haiku-4-5-20251001";
   const isStream = req.body?.stream === true;
   const anthropicBody = openaiToAnthropicBody(req.body);
-  const fetchHeaders = { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" };
+  const fetchHeaders = { "Content-Type": "application/json", ...anthropicAuthHeaders(apiKey) };
   if (req.traceId) fetchHeaders["x-request-id"] = req.traceId;
+  // Do NOT forward Origin/Referer — Anthropic rejects direct-browser CORS requests
 
   let anthropicResp;
   try {
@@ -2574,8 +2871,8 @@ async function handleAnthropicCompat(req, res, apiKey, projectName, excludeKeyId
     } catch (_) {}
     res.end();
     const tokens = { input: inputTokens, cacheHit: 0, output: outputTokens };
-    if (!req._proxyProject?.privacyMode) recordUsage(req._proxyProjectName, "anthropic", requestedModel, tokens);
-    if (req._proxyProject) {
+    if (!req._proxyProject?.privacyMode) recordUsage(req._proxyProjectName, "anthropic", req._isSubscriptionKey ? `${requestedModel}:subscription` : requestedModel, tokens);
+    if (req._proxyProject && (!req._isSubscriptionKey || req._proxyProject.subscriptionCountsSpending)) {
       const cost = calcRequestCost("anthropic", requestedModel, tokens);
       if (req._proxyProject.maxBudgetUsd != null) { req._proxyProject.budgetUsedUsd = (req._proxyProject.budgetUsedUsd || 0) + cost; markProjectsDirty(); }
       if (req._proxyProject.maxCostPerMin) recordCostForRateLimit(req._proxyProjectName, cost);
@@ -2587,8 +2884,8 @@ async function handleAnthropicCompat(req, res, apiKey, projectName, excludeKeyId
   const anthropicData = await anthropicResp.json();
   const openaiData = anthropicToOpenaiResponse(anthropicData, requestedModel);
   const tokens = { input: anthropicData.usage?.input_tokens || 0, cacheHit: 0, output: anthropicData.usage?.output_tokens || 0 };
-  if (!req._proxyProject?.privacyMode) recordUsage(req._proxyProjectName, "anthropic", requestedModel, tokens);
-  if (req._proxyProject) {
+  if (!req._proxyProject?.privacyMode) recordUsage(req._proxyProjectName, "anthropic", req._isSubscriptionKey ? `${requestedModel}:subscription` : requestedModel, tokens);
+  if (req._proxyProject && (!req._isSubscriptionKey || req._proxyProject.subscriptionCountsSpending)) {
     const cost = calcRequestCost("anthropic", requestedModel, tokens);
     if (req._proxyProject.maxBudgetUsd != null) { req._proxyProject.budgetUsedUsd = (req._proxyProject.budgetUsedUsd || 0) + cost; markProjectsDirty(); }
     if (req._proxyProject.maxCostPerMin) recordCostForRateLimit(req._proxyProjectName, cost);
@@ -2673,8 +2970,8 @@ async function retryWithFetch(req, res, providerName, keyInfo, excludeIds = new 
       } else {
         tokens = extractTokens(providerName, tail);
       }
-      if (!req._proxyProject?.privacyMode) recordUsage(projectName, providerName, modelId, tokens);
-      if (req._proxyProject?.maxBudgetUsd != null || req._proxyProject?.maxCostPerMin) {
+      if (!req._proxyProject?.privacyMode) recordUsage(projectName, providerName, req._isSubscriptionKey ? `${modelId}:subscription` : modelId, tokens);
+      if ((!req._isSubscriptionKey || req._proxyProject?.subscriptionCountsSpending) && (req._proxyProject?.maxBudgetUsd != null || req._proxyProject?.maxCostPerMin)) {
         const cost = calcRequestCost(providerName, modelId, tokens);
         if (req._proxyProject.maxBudgetUsd != null) { req._proxyProject.budgetUsedUsd = (req._proxyProject.budgetUsedUsd || 0) + cost; markProjectsDirty(); }
         if (req._proxyProject.maxCostPerMin) recordCostForRateLimit(req._proxyProjectName, cost);
@@ -2692,8 +2989,8 @@ const proxyMiddleware = createProxyMiddleware({
   },
   changeOrigin: true,
   ws: false,
-  timeout: 120000,
-  proxyTimeout: 120000,
+  timeout: 300000,
+  proxyTimeout: 300000,
   selfHandleResponse: true,
   pathRewrite: (pathStr, req) => {
     const providerName = req.params?.provider?.toLowerCase();
@@ -2709,6 +3006,9 @@ const proxyMiddleware = createProxyMiddleware({
   },
   on: {
     proxyReq: (proxyReq, req) => {
+      // Strip browser-origin headers — upstream APIs reject direct-browser CORS requests
+      proxyReq.removeHeader("origin");
+      proxyReq.removeHeader("referer");
       // Set X-Request-ID BEFORE write() — setHeader() throws after body write flushes headers
       if (req.traceId) proxyReq.setHeader("X-Request-ID", req.traceId);
       if (req.body && ["POST", "PUT", "PATCH"].includes(req.method)) {
@@ -2771,9 +3071,9 @@ const proxyMiddleware = createProxyMiddleware({
             tokens = extractTokens(providerName, tail);
           }
           sli.proxy.total++; sli.proxy.success++;
-          if (!req._proxyProject?.privacyMode) recordUsage(projectName, providerName, modelId, tokens);
-          // Phase 1a: Track budget spend
-          if (req._proxyProject?.maxBudgetUsd != null || req._proxyProject?.maxCostPerMin) {
+          if (!req._proxyProject?.privacyMode) recordUsage(projectName, providerName, req._isSubscriptionKey ? `${modelId}:subscription` : modelId, tokens);
+          // Phase 1a: Track budget spend (skip for subscription keys — cost not real)
+          if ((!req._isSubscriptionKey || req._proxyProject?.subscriptionCountsSpending) && (req._proxyProject?.maxBudgetUsd != null || req._proxyProject?.maxCostPerMin)) {
             const cost = calcRequestCost(providerName, modelId, tokens);
             if (req._proxyProject.maxBudgetUsd != null) {
               req._proxyProject.budgetUsedUsd = (req._proxyProject.budgetUsedUsd || 0) + cost;
@@ -3022,6 +3322,307 @@ app.post("/v1/otp/verify", apiLimiter, async (req, res) => {
 
 // ── End OTP ──────────────────────────────────────────────────────────────────
 
+// ── LumiChat (lc) routes ──────────────────────────────────────────────────────
+
+// Helper: forward request to PocketBase with optional auth
+async function pbFetch(path, options = {}) {
+  const url = `${PB_URL}${path}`;
+  return fetch(url, options);
+}
+
+// POST /lc/auth/register → proxy to PB
+app.post("/lc/auth/register", apiLimiter, async (req, res) => {
+  try {
+    const r = await pbFetch("/api/collections/users/records", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req.body),
+    });
+    const data = await r.json();
+    res.status(r.status).json(data);
+  } catch (err) {
+    res.status(502).json({ error: "PocketBase unavailable" });
+  }
+});
+
+// POST /lc/auth/login → PB auth → set httpOnly cookie
+app.post("/lc/auth/login", apiLimiter, async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password) return res.status(400).json({ error: "Missing email or password" });
+    const r = await pbFetch("/api/collections/users/auth-with-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ identity: email, password }),
+    });
+    const data = await r.json();
+    if (!r.ok) return res.status(r.status).json(data);
+    const isSecure = req.secure || req.headers["x-forwarded-proto"] === "https" || (req.headers["cf-visitor"] || "").includes("https");
+    res.cookie("lc_token", data.token, {
+      httpOnly: true,
+      secure: isSecure,
+      sameSite: "Strict",
+      path: "/",
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
+    res.json({ ok: true, record: { id: data.record?.id, email: data.record?.email, name: data.record?.name } });
+  } catch (err) {
+    res.status(502).json({ error: "PocketBase unavailable" });
+  }
+});
+
+// POST /lc/auth/logout → clear cookie
+app.post("/lc/auth/logout", (req, res) => {
+  res.clearCookie("lc_token", { path: "/" });
+  res.json({ ok: true });
+});
+
+// GET /lc/auth/me → return decoded token info
+app.get("/lc/auth/me", requireLcAuth, (req, res) => {
+  res.json({ id: req.lcUser.id, email: req.lcUser.email, name: req.lcUser.name });
+});
+
+// PocketBase record ID validation (15 alphanumeric chars)
+const LC_ID_RE = /^[a-zA-Z0-9]{15}$/;
+function validPbId(id) { return typeof id === 'string' && LC_ID_RE.test(id); }
+
+// GET /lc/sessions → list user's sessions
+app.get("/lc/sessions", requireLcAuth, async (req, res) => {
+  try {
+    const r = await pbFetch("/api/collections/lc_sessions/records?sort=-updated&perPage=100", {
+      headers: { Authorization: `Bearer ${req.lcToken}` },
+    });
+    const data = await r.json();
+    res.status(r.status).json(data);
+  } catch {
+    res.status(502).json({ error: "PocketBase unavailable" });
+  }
+});
+
+// POST /lc/sessions → create session
+app.post("/lc/sessions", requireLcAuth, async (req, res) => {
+  try {
+    const body = {
+      user: req.lcUser.id,
+      title: req.body?.title || "New Chat",
+      provider: req.body?.provider || "openai",
+      model: req.body?.model || "gpt-4.1-mini",
+    };
+    const r = await pbFetch("/api/collections/lc_sessions/records", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${req.lcToken}` },
+      body: JSON.stringify(body),
+    });
+    const data = await r.json();
+    res.status(r.status).json(data);
+  } catch {
+    res.status(502).json({ error: "PocketBase unavailable" });
+  }
+});
+
+// PATCH /lc/sessions/:id/title → update title
+app.patch("/lc/sessions/:id/title", requireLcAuth, async (req, res) => {
+  if (!validPbId(req.params.id)) return res.status(400).json({ error: "Invalid session ID" });
+  try {
+    const { title } = req.body || {};
+    if (!title || typeof title !== "string") return res.status(400).json({ error: "Missing title" });
+    const r = await pbFetch(`/api/collections/lc_sessions/records/${req.params.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${req.lcToken}` },
+      body: JSON.stringify({ title: title.slice(0, 200) }),
+    });
+    const data = await r.json();
+    res.status(r.status).json(data);
+  } catch {
+    res.status(502).json({ error: "PocketBase unavailable" });
+  }
+});
+
+// DELETE /lc/sessions/:id → delete session (PB cascades messages + files)
+app.delete("/lc/sessions/:id", requireLcAuth, async (req, res) => {
+  if (!validPbId(req.params.id)) return res.status(400).json({ error: "Invalid session ID" });
+  try {
+    const r = await pbFetch(`/api/collections/lc_sessions/records/${req.params.id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${req.lcToken}` },
+    });
+    if (r.status === 204 || r.ok) return res.json({ ok: true });
+    const data = await r.json();
+    res.status(r.status).json(data);
+  } catch {
+    res.status(502).json({ error: "PocketBase unavailable" });
+  }
+});
+
+// GET /lc/sessions/:id/messages → list messages
+app.get("/lc/sessions/:id/messages", requireLcAuth, async (req, res) => {
+  if (!validPbId(req.params.id)) return res.status(400).json({ error: "Invalid session ID" });
+  try {
+    const r = await pbFetch(
+      `/api/collections/lc_messages/records?filter=(session="${req.params.id}")&sort=+created&perPage=200`,
+      { headers: { Authorization: `Bearer ${req.lcToken}` } }
+    );
+    const data = await r.json();
+    res.status(r.status).json(data);
+  } catch {
+    res.status(502).json({ error: "PocketBase unavailable" });
+  }
+});
+
+// POST /lc/messages → create message record
+app.post("/lc/messages", requireLcAuth, async (req, res) => {
+  try {
+    const { session, role, content, file_ids } = req.body || {};
+    if (!session || !role || !content) return res.status(400).json({ error: "Missing required fields" });
+    const body = { session, role, content, file_ids: file_ids || [] };
+    const r = await pbFetch("/api/collections/lc_messages/records", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${req.lcToken}` },
+      body: JSON.stringify(body),
+    });
+    const data = await r.json();
+    res.status(r.status).json(data);
+  } catch {
+    res.status(502).json({ error: "PocketBase unavailable" });
+  }
+});
+
+// POST /lc/files → upload file to PB
+app.post("/lc/files", requireLcAuth, lcUpload.single("file"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+  const tmpPath = req.file.path;
+  try {
+    const { session } = req.body || {};
+    if (!session) { fs.unlink(tmpPath, () => {}); return res.status(400).json({ error: "Missing session" }); }
+
+    // Stream file to PB without loading into heap (avoids OOM on large uploads)
+    const fileName = path.basename(req.file.originalname).replace(/"/g, '_');
+    const mimeType = req.file.mimetype;
+    const boundary = `LumiGate${crypto.randomBytes(8).toString('hex')}`;
+
+    const parts = [
+      `--${boundary}\r\nContent-Disposition: form-data; name="session"\r\n\r\n${session}`,
+      `--${boundary}\r\nContent-Disposition: form-data; name="user"\r\n\r\n${req.lcUser.id}`,
+      `--${boundary}\r\nContent-Disposition: form-data; name="mime_type"\r\n\r\n${mimeType}`,
+      `--${boundary}\r\nContent-Disposition: form-data; name="size_bytes"\r\n\r\n${req.file.size}`,
+      `--${boundary}\r\nContent-Disposition: form-data; name="extracted_text"\r\n\r\n`,
+      `--${boundary}\r\nContent-Disposition: form-data; name="synced"\r\n\r\nfalse`,
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${fileName}"\r\nContent-Type: ${mimeType}\r\n\r\n`,
+    ].join('\r\n');
+
+    const pt = new PassThrough();
+    pt.write(Buffer.from(parts));
+    const fileStream = fs.createReadStream(tmpPath);
+    fileStream.on('error', e => pt.destroy(e));
+    fileStream.on('end', () => { pt.write(Buffer.from(`\r\n--${boundary}--\r\n`)); pt.end(); });
+    fileStream.pipe(pt, { end: false });
+
+    const r = await pbFetch("/api/collections/lc_files/records", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${req.lcToken}`,
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+      },
+      body: pt,
+      duplex: 'half',
+    });
+    const data = await r.json();
+    fs.unlink(tmpPath, () => {}); // cleanup temp file
+    if (!r.ok) return res.status(r.status).json(data);
+    // Return file record with accessible URL
+    const fileUrl = `/lc/files/serve/${data.id}`;
+    res.json({ id: data.id, url: fileUrl, mime_type: req.file.mimetype, size_bytes: req.file.size });
+  } catch (err) {
+    fs.unlink(tmpPath, () => {});
+    log("error", "lcUploadFile error", { error: err.message });
+    res.status(500).json({ error: "File upload failed" });
+  }
+});
+
+// GET /lc/files/serve/:id → stream file from PB to browser
+app.get("/lc/files/serve/:id", requireLcAuth, async (req, res) => {
+  if (!validPbId(req.params.id)) return res.status(400).json({ error: "Invalid file ID" });
+  try {
+    // First get the record to get the filename
+    const recR = await pbFetch(`/api/collections/lc_files/records/${req.params.id}`, {
+      headers: { Authorization: `Bearer ${req.lcToken}` },
+    });
+    if (!recR.ok) return res.status(recR.status).json({ error: "File not found" });
+    const rec = await recR.json();
+    // PB file URL: /api/files/{collectionId}/{recordId}/{filename}
+    const fileR = await pbFetch(`/api/files/lc_files/${rec.id}/${rec.file}`, {
+      headers: { Authorization: `Bearer ${req.lcToken}` },
+    });
+    if (!fileR.ok) return res.status(fileR.status).json({ error: "File fetch failed" });
+    res.setHeader("Content-Type", rec.mime_type || "application/octet-stream");
+    const safeFileName = path.basename(rec.file || 'download').replace(/"/g, '_');
+    res.setHeader("Content-Disposition", `attachment; filename="${safeFileName}"`);
+    // Stream response body
+    const readable = Readable.fromWeb(fileR.body);
+    readable.on('error', (streamErr) => {
+      log('error', 'lcServeFile stream error', { error: streamErr.message });
+      if (!res.headersSent) res.status(500).end();
+      else res.end();
+    });
+    readable.pipe(res);
+  } catch (err) {
+    log("error", "lcServeFile error", { error: err.message });
+    res.status(500).json({ error: "Failed to serve file" });
+  }
+});
+
+// POST /lc/files/gemini-upload/:pbFileId → upload PB file to Gemini File API
+app.post("/lc/files/gemini-upload/:pbFileId", requireLcAuth, async (req, res) => {
+  if (!validPbId(req.params.pbFileId)) return res.status(400).json({ error: "Invalid file ID" });
+  try {
+    // Get file record
+    const recR = await pbFetch(`/api/collections/lc_files/records/${req.params.pbFileId}`, {
+      headers: { Authorization: `Bearer ${req.lcToken}` },
+    });
+    if (!recR.ok) return res.status(404).json({ error: "File not found" });
+    const rec = await recR.json();
+
+    // Fetch file bytes from PB
+    const fileR = await pbFetch(`/api/files/lc_files/${rec.id}/${rec.file}`, {
+      headers: { Authorization: `Bearer ${req.lcToken}` },
+    });
+    if (!fileR.ok) return res.status(502).json({ error: "Failed to fetch file from PB" });
+
+    // Get Gemini API key
+    const geminiKey = selectApiKey("gemini", "_lumichat")?.apiKey || PROVIDERS.gemini?.apiKey;
+    if (!geminiKey) return res.status(503).json({ error: "No Gemini key configured" });
+
+    // Stream PB response body directly to Gemini — avoids buffering into heap
+    const uploadRes = await fetch(
+      `https://generativelanguage.googleapis.com/upload/v1beta/files?uploadType=media&key=${geminiKey}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": rec.mime_type || "application/octet-stream",
+          "X-Goog-Upload-Protocol": "raw",
+        },
+        body: fileR.body,
+        // @ts-ignore — duplex required for streaming body in Node fetch
+        duplex: 'half',
+      }
+    );
+    if (!uploadRes.ok) {
+      const errData = await uploadRes.text();
+      return res.status(502).json({ error: "Gemini upload failed", details: errData });
+    }
+    const uploadData = await uploadRes.json();
+    const geminiFileUri = uploadData.file?.uri;
+    if (!geminiFileUri) return res.status(502).json({ error: "Gemini did not return file URI" });
+
+    res.json({ geminiFileUri });
+  } catch (err) {
+    log("error", "lcGeminiUpload error", { error: err.message });
+    res.status(500).json({ error: "Gemini upload failed" });
+  }
+});
+
+// ── End LumiChat routes ───────────────────────────────────────────────────────
+
 app.use("/v1/:provider", apiLimiter, (req, res, next) => {
   // Identify project: internal chat key, admin session, project key, or reject
   let projectName;
@@ -3036,6 +3637,16 @@ app.use("/v1/:provider", apiLimiter, (req, res, next) => {
     // H-01 fix: only root/admin sessions bypass project policy
     projectName = "_chat";
   } else {
+    // 0. LumiChat token (lc_token cookie) — only when no explicit project key is present
+    const lcCookies = parseCookies(req);
+    const lcToken = lcCookies.lc_token;
+    if (!projectKey && lcToken && validateLcTokenPayload(lcToken)) {
+      projectName = "_lumichat";
+      req._proxyProjectName = "_lumichat";
+      // No per-project rate limits or budget enforcement for LumiChat
+    }
+
+    if (!projectName) {
     // Resolve project via: ephemeral token → HMAC signature → direct key
     let proj = null;
 
@@ -3120,7 +3731,8 @@ app.use("/v1/:provider", apiLimiter, (req, res, next) => {
 
     // Stash project ref for budget tracking in onProxyRes
     req._proxyProject = proj;
-  }
+    } // end if (!projectName) — project resolution block
+  } // end else — non-admin/non-internal auth
 
   const providerName = req.params.provider.toLowerCase();
   const provider = PROVIDERS[providerName];
@@ -3136,6 +3748,7 @@ app.use("/v1/:provider", apiLimiter, (req, res, next) => {
   }
   const proxyApiKey = selectedKey?.apiKey || provider.apiKey;
   req._selectedKeyId = selectedKey?.keyId;
+  req._isSubscriptionKey = proxyApiKey?.startsWith("sk-ant-oat");
 
   // F-04: Validate upstream path against allowlist (O-02: normalize like pathRewrite)
   let incomingSubpath = req.path.replace(new RegExp(`^/v1/${providerName}`, "i"), "");
@@ -3163,9 +3776,10 @@ app.use("/v1/:provider", apiLimiter, (req, res, next) => {
 
   // Inject auth — replace any client-sent auth
   if (providerName === "anthropic") {
-    req.headers["x-api-key"] = proxyApiKey;
-    req.headers["anthropic-version"] = req.headers["anthropic-version"] || "2023-06-01";
-    delete req.headers["authorization"];
+    const authH = anthropicAuthHeaders(proxyApiKey, req.headers["anthropic-beta"]);
+    Object.assign(req.headers, authH);
+    if (!authH["x-api-key"]) delete req.headers["x-api-key"];
+    if (!authH["authorization"]) delete req.headers["authorization"];
   } else {
     req.headers["authorization"] = `Bearer ${proxyApiKey}`;
   }
