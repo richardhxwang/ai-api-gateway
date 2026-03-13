@@ -3055,9 +3055,12 @@ const proxyMiddleware = createProxyMiddleware({
       // For providers that embed <think>...</think> in delta.content (e.g. MiniMax),
       // strip the reasoning block so clients receive clean content only.
       const THINK_STRIP_PROVIDERS = new Set(["minimax"]);
-      const thinkState = (THINK_STRIP_PROVIDERS.has(providerName) && isStreaming)
+      const needsThinkStrip = THINK_STRIP_PROVIDERS.has(providerName);
+      const thinkState = (needsThinkStrip && isStreaming)
         ? { lineBuf: "", inThink: false, thinkBuf: "" }
         : null;
+      // For non-streaming: buffer full body, strip think tags on end
+      let nonStreamThinkBuf = (needsThinkStrip && !isStreaming) ? "" : null;
 
       function stripThinkFromSSEChunk(raw) {
         thinkState.lineBuf += raw;
@@ -3114,12 +3117,28 @@ const proxyMiddleware = createProxyMiddleware({
         if (thinkState) {
           const filtered = stripThinkFromSSEChunk(str);
           if (filtered) res.write(filtered);
+        } else if (nonStreamThinkBuf !== null) {
+          nonStreamThinkBuf += str;
         } else {
           res.write(chunk);
         }
       });
       proxyRes.on("end", () => {
-        res.end();
+        if (nonStreamThinkBuf !== null) {
+          try {
+            const j = JSON.parse(nonStreamThinkBuf);
+            for (const choice of (j.choices || [])) {
+              if (choice.message && typeof choice.message.content === "string") {
+                choice.message.content = choice.message.content.replace(/<think>[\s\S]*?<\/think>\n*/g, "").trimStart();
+              }
+            }
+            res.end(JSON.stringify(j));
+          } catch {
+            res.end(nonStreamThinkBuf); // parse failed, pass through
+          }
+        } else {
+          res.end();
+        }
         try {
           let tokens;
           if (isStreaming) {
