@@ -20,28 +20,46 @@
     }
     html,body{height:100%;background:var(--bg);color:var(--t1);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-size:15px;line-height:1.6;overflow:hidden}
 
-    /* AUTH */
-    #auth{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:200}
-    .auth-card{background:#2a2a2a;border:1px solid var(--border);border-radius:16px;padding:40px;width:360px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
-    .auth-logo{text-align:center;margin-bottom:28px}
-    .auth-logo h1{font-size:22px;font-weight:700;color:var(--t1)}
-    .auth-logo p{font-size:13px;color:var(--t2);margin-top:4px}
-    .auth-tabs{display:flex;border:1px solid var(--border);border-radius:8px;margin-bottom:24px;overflow:hidden}
-    .auth-tab{flex:1;padding:8px;background:transparent;border:none;color:var(--t2);cursor:pointer;font-size:13.5px;transition:all .15s}
-    .auth-tab.active{background:var(--sb-active);color:var(--t1)}
-    .auth-field{margin-bottom:14px}
-    .auth-field label{display:block;font-size:12.5px;color:var(--t2);margin-bottom:6px}
-    .auth-field input{width:100%;background:#1a1a1a;border:1px solid var(--inp-b);border-radius:8px;padding:10px 12px;color:var(--t1);font-size:14px;outline:none;transition:border .15s;-webkit-text-fill-color:var(--t1)}
+    /* AUTH — ChatGPT/Claude style */
+    #auth{position:fixed;inset:0;background:#0d0d0d;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:200;padding:20px}
+    .auth-wrap{width:100%;max-width:400px}
+    .auth-logo{text-align:center;margin-bottom:32px}
+    .auth-logo svg{width:40px;height:40px;margin-bottom:16px}
+    .auth-logo h1{font-size:28px;font-weight:700;color:#fff;letter-spacing:-.5px}
+    .auth-logo p{font-size:14px;color:#8e8e8e;margin-top:6px}
+    .google-btn{width:100%;padding:13px 16px;background:#fff;border:1px solid #e0e0e0;border-radius:12px;color:#1a1a1a;font-size:15px;font-weight:500;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;transition:background .15s,box-shadow .15s;margin-bottom:4px}
+    .google-btn:hover{background:#f5f5f5;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+    .auth-divider{display:flex;align-items:center;gap:12px;margin:20px 0;color:#555;font-size:13px}
+    .auth-divider::before,.auth-divider::after{content:'';flex:1;height:1px;background:#2a2a2a}
+    /* step-based: show email first, then password */
+    .auth-step{display:flex;flex-direction:column;gap:12px}
+    .auth-heading{font-size:22px;font-weight:700;color:#fff;margin-bottom:4px;text-align:center}
+    .auth-sub{font-size:13.5px;color:#8e8e8e;text-align:center;margin-bottom:8px}
+    .auth-input{width:100%;background:#1a1a1a;border:1.5px solid #2e2e2e;border-radius:12px;padding:14px 16px;color:#fff;font-size:15px;outline:none;transition:border .15s;-webkit-text-fill-color:#fff}
+    .auth-input:focus{border-color:var(--accent)}
+    .auth-input::placeholder{color:#555}
+    .auth-input:-webkit-autofill,.auth-input:-webkit-autofill:hover,.auth-input:-webkit-autofill:focus{-webkit-box-shadow:0 0 0 1000px #1a1a1a inset!important;-webkit-text-fill-color:#fff!important;border-color:#2e2e2e!important;caret-color:#fff}
+    .auth-btn{width:100%;padding:14px;background:var(--accent);border:none;border-radius:12px;color:#fff;font-size:15px;font-weight:600;cursor:pointer;transition:opacity .15s,background .15s}
+    .auth-btn:hover:not(:disabled){background:#0d9268}
+    .auth-btn:disabled{opacity:.4;cursor:default}
+    .auth-btn-ghost{width:100%;padding:14px;background:transparent;border:1.5px solid #2e2e2e;border-radius:12px;color:#fff;font-size:15px;font-weight:500;cursor:pointer;transition:border .15s,background .15s}
+    .auth-btn-ghost:hover{background:#1a1a1a;border-color:#444}
+    .auth-link{text-align:center;font-size:13.5px;color:#8e8e8e;margin-top:4px}
+    .auth-link a{color:#10a37f;cursor:pointer;text-decoration:none}
+    .auth-link a:hover{text-decoration:underline}
+    .auth-err{color:#f87171;font-size:13px;text-align:center;min-height:18px;margin-top:2px}
+    /* legacy compat */
+    .auth-field{margin-bottom:12px}
+    .auth-field label{display:block;font-size:12.5px;color:#8e8e8e;margin-bottom:6px}
+    .auth-field input{width:100%;background:#1a1a1a;border:1.5px solid #2e2e2e;border-radius:12px;padding:13px 16px;color:#fff;font-size:15px;outline:none;transition:border .15s;-webkit-text-fill-color:#fff}
     .auth-field input:focus{border-color:var(--accent)}
-    .auth-field input:-webkit-autofill,.auth-field input:-webkit-autofill:hover,.auth-field input:-webkit-autofill:focus{-webkit-box-shadow:0 0 0 1000px #1a1a1a inset!important;-webkit-text-fill-color:var(--t1)!important;border-color:var(--inp-b)!important;caret-color:var(--t1)}
-    .auth-submit{width:100%;padding:11px;background:var(--accent);border:none;border-radius:8px;color:#fff;font-size:14px;font-weight:600;cursor:pointer;margin-top:4px;transition:opacity .15s}
-    .auth-submit:hover{opacity:.88}
+    .auth-field input::placeholder{color:#555}
+    .auth-field input:-webkit-autofill,.auth-field input:-webkit-autofill:hover,.auth-field input:-webkit-autofill:focus{-webkit-box-shadow:0 0 0 1000px #1a1a1a inset!important;-webkit-text-fill-color:#fff!important;border-color:#2e2e2e!important;caret-color:#fff}
+    .auth-submit{width:100%;padding:14px;background:var(--accent);border:none;border-radius:12px;color:#fff;font-size:15px;font-weight:600;cursor:pointer;transition:opacity .15s}
+    .auth-submit:hover:not(:disabled){opacity:.9}
     .auth-submit:disabled{opacity:.4;cursor:default}
-    .auth-err{color:#f87171;font-size:12.5px;margin-top:10px;text-align:center;min-height:18px}
-    .google-btn{width:100%;padding:11px;background:#fff;border:1px solid #dadce0;border-radius:8px;color:#3c4043;font-size:14px;font-weight:500;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;transition:background .15s}
-    .google-btn:hover{background:#f8f9fa}
-    .auth-divider{display:flex;align-items:center;gap:10px;margin:12px 0;color:var(--t3);font-size:12px}
-    .auth-divider::before,.auth-divider::after{content:'';flex:1;height:1px;background:var(--border)}
+    .auth-tabs{display:none}
+    .auth-card{background:transparent;border:none;padding:0;width:100%}
 
     /* LAYOUT */
     #app{display:flex;height:100%}
@@ -190,38 +208,68 @@
 
 <!-- AUTH SCREEN -->
 <div id="auth">
-  <div class="auth-card">
+  <div class="auth-wrap">
+    <!-- Logo -->
     <div class="auth-logo">
+      <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="20" cy="20" r="20" fill="#10a37f"/>
+        <path d="M12 20c0-4.4 3.6-8 8-8s8 3.6 8 8-3.6 8-8 8" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>
+        <circle cx="20" cy="20" r="3" fill="#fff"/>
+      </svg>
       <h1>LumiChat</h1>
-      <p>Sign in to continue</p>
     </div>
-    <!-- Google OAuth button (shown when available) -->
-    <div id="google-btn-wrap" style="display:none;margin-bottom:16px">
-      <button class="google-btn" id="google-btn">
-        <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.08 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-3.59-13.46-8.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/><path fill="none" d="M0 0h48v48H0z"/></svg>
-        Continue with Google
-      </button>
-      <div class="auth-divider"><span>or</span></div>
+
+    <!-- Step 1: Welcome — Google + email entry -->
+    <div id="auth-step-welcome">
+      <p class="auth-heading">Welcome</p>
+      <p class="auth-sub" style="margin-bottom:20px">Log in or create an account</p>
+
+      <!-- Google button -->
+      <div id="google-btn-wrap" style="display:none">
+        <button class="google-btn" id="google-btn">
+          <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.08 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-3.59-13.46-8.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+          Continue with Google
+        </button>
+        <div class="auth-divider"><span>or</span></div>
+      </div>
+
+      <div class="auth-step">
+        <input class="auth-input" type="email" id="l-email" placeholder="Email address" autocomplete="email">
+        <button class="auth-btn" id="email-continue-btn">Continue</button>
+      </div>
+      <div class="auth-err" id="auth-err"></div>
     </div>
-    <div class="auth-tabs">
-      <button class="auth-tab active" id="tab-login">Sign in</button>
-      <button class="auth-tab" id="tab-reg">Create account</button>
+
+    <!-- Step 2: Login password -->
+    <div id="auth-step-login" style="display:none">
+      <p class="auth-heading">Welcome back</p>
+      <p class="auth-sub" id="login-email-display" style="margin-bottom:20px"></p>
+      <div class="auth-step">
+        <input class="auth-input" type="password" id="l-pass" placeholder="Password" autocomplete="current-password">
+        <button class="auth-btn" id="l-btn">Continue</button>
+        <div class="auth-link"><a id="back-to-email">← Use a different email</a></div>
+      </div>
+      <div class="auth-err" id="auth-err-login"></div>
     </div>
-    <!-- Login -->
-    <div id="form-login">
-      <div class="auth-field"><label>Email</label><input type="email" id="l-email" placeholder="you@example.com" autocomplete="email"></div>
-      <div class="auth-field"><label>Password</label><input type="password" id="l-pass" placeholder="••••••••" autocomplete="current-password"></div>
-      <button class="auth-submit" id="l-btn">Sign in</button>
+
+    <!-- Step 3: Register -->
+    <div id="auth-step-reg" style="display:none">
+      <p class="auth-heading">Create account</p>
+      <p class="auth-sub" id="reg-email-display" style="margin-bottom:20px"></p>
+      <div class="auth-step">
+        <input class="auth-input" type="text" id="r-name" placeholder="Your name" autocomplete="name">
+        <input class="auth-input" type="password" id="r-pass" placeholder="Password (min 8 chars)" autocomplete="new-password">
+        <input class="auth-input" type="password" id="r-pass2" placeholder="Confirm password" autocomplete="new-password">
+        <button class="auth-btn" id="r-btn">Create account</button>
+        <div class="auth-link"><a id="back-to-email2">← Use a different email</a></div>
+      </div>
+      <div class="auth-err" id="auth-err-reg"></div>
     </div>
-    <!-- Register -->
-    <div id="form-reg" style="display:none">
-      <div class="auth-field"><label>Name</label><input type="text" id="r-name" placeholder="Your name" autocomplete="name"></div>
-      <div class="auth-field"><label>Email</label><input type="email" id="r-email" placeholder="you@example.com" autocomplete="email"></div>
-      <div class="auth-field"><label>Password</label><input type="password" id="r-pass" placeholder="Min 8 characters" autocomplete="new-password"></div>
-      <div class="auth-field"><label>Confirm Password</label><input type="password" id="r-pass2" placeholder="••••••••" autocomplete="new-password"></div>
-      <button class="auth-submit" id="r-btn">Create account</button>
-    </div>
-    <div class="auth-err" id="auth-err"></div>
+
+    <!-- Hidden compat fields -->
+    <input type="hidden" id="r-email">
+    <div id="form-login" style="display:none"></div>
+    <div id="form-reg" style="display:none"></div>
   </div>
 </div>
 
@@ -347,7 +395,11 @@ async function apiJSON(path, opts={}){
 }
 
 // ── AUTH ───────────────────────────────────────────────────────────────────
-function showAuth(){ authEl.style.display='flex'; appEl.style.display='none'; }
+function showAuth(){
+  authEl.style.display='flex'; appEl.style.display='none';
+  showAuthStep('auth-step-welcome');
+  $('l-email').value=''; $('l-pass').value=''; $('auth-err').textContent='';
+}
 function showApp(){ authEl.style.display='none'; appEl.style.display='flex'; }
 
 async function tryRestoreSession(){
@@ -369,46 +421,100 @@ function onLoggedIn(){
   renderSuggestions();
 }
 
-// Login
-$('tab-login').addEventListener('click',()=>{
-  $('tab-login').classList.add('active'); $('tab-reg').classList.remove('active');
-  $('form-login').style.display=''; $('form-reg').style.display='none'; $('auth-err').textContent='';
-});
-$('tab-reg').addEventListener('click',()=>{
-  $('tab-reg').classList.add('active'); $('tab-login').classList.remove('active');
-  $('form-reg').style.display=''; $('form-login').style.display='none'; $('auth-err').textContent='';
-});
+// ── AUTH STEP FLOW ─────────────────────────────────────────────────────────
+function showAuthStep(step){
+  ['auth-step-welcome','auth-step-login','auth-step-reg'].forEach(id=>{
+    const el=$( id); if(el) el.style.display= id===step?'':'none';
+  });
+}
 
+// Step 1 → check email → decide login or register
+$('email-continue-btn').addEventListener('click', checkEmail);
+$('l-email').addEventListener('keydown', e=>{ if(e.key==='Enter') checkEmail(); });
+
+async function checkEmail(){
+  const email=$('l-email').value.trim();
+  if(!email){ $('auth-err').textContent='Enter your email address'; return; }
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ $('auth-err').textContent='Enter a valid email'; return; }
+  $('auth-err').textContent='';
+  const btn=$('email-continue-btn'); btn.disabled=true; btn.textContent='Checking…';
+  try{
+    // Try fetching – if user exists login step; if not, register step
+    const res = await fetch('/lc/auth/check-email',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({email})
+    });
+    const data = res.ok ? await res.json() : {exists:false};
+    if(data.exists){
+      $('login-email-display').textContent=email;
+      showAuthStep('auth-step-login');
+      $('l-pass').focus();
+    } else {
+      $('reg-email-display').textContent=email;
+      showAuthStep('auth-step-reg');
+      $('r-name').focus();
+    }
+  }catch{
+    // If endpoint doesn't exist, fall back to showing register
+    $('reg-email-display').textContent=email;
+    showAuthStep('auth-step-reg');
+    $('r-name').focus();
+  } finally{ btn.disabled=false; btn.textContent='Continue'; }
+}
+
+// Back links
+$('back-to-email').addEventListener('click',()=>{ showAuthStep('auth-step-welcome'); $('l-email').focus(); });
+$('back-to-email2').addEventListener('click',()=>{ showAuthStep('auth-step-welcome'); $('l-email').focus(); });
+
+// Step 2: Login
 async function doLogin(){
   const email=$('l-email').value.trim(), pass=$('l-pass').value;
-  if(!email||!pass){$('auth-err').textContent='Enter email and password';return;}
+  if(!pass){ $('auth-err-login').textContent='Enter your password'; return; }
+  $('auth-err-login').textContent='';
   const btn=$('l-btn'); btn.disabled=true; btn.textContent='Signing in…';
   try{
     await apiJSON('/lc/auth/login',{method:'POST',body:JSON.stringify({email,password:pass})});
     const me=await apiJSON('/lc/auth/me');
-    currentUser=me; $('auth-err').textContent=''; onLoggedIn();
-  }catch(e){ $('auth-err').textContent=e.message; }
-  finally{ btn.disabled=false; btn.textContent='Sign in'; }
+    currentUser=me; onLoggedIn();
+  }catch(e){ $('auth-err-login').textContent=e.message; }
+  finally{ btn.disabled=false; btn.textContent='Continue'; }
 }
+$('l-btn').addEventListener('click',doLogin);
+$('l-pass').addEventListener('keydown',e=>{ if(e.key==='Enter') doLogin(); });
+
+// Step 3: Register
 async function doRegister(){
-  const name=$('r-name').value.trim(), email=$('r-email').value.trim();
+  const email=$('l-email').value.trim();
+  const name=$('r-name').value.trim();
   const pass=$('r-pass').value, pass2=$('r-pass2').value;
-  if(!name||!email||!pass){$('auth-err').textContent='All fields required';return;}
-  if(pass!==pass2){$('auth-err').textContent='Passwords do not match';return;}
-  if(pass.length<8){$('auth-err').textContent='Password must be at least 8 characters';return;}
+  if(!name){ $('auth-err-reg').textContent='Enter your name'; return; }
+  if(!pass){ $('auth-err-reg').textContent='Enter a password'; return; }
+  if(pass!==pass2){ $('auth-err-reg').textContent='Passwords do not match'; return; }
+  if(pass.length<8){ $('auth-err-reg').textContent='Password must be at least 8 characters'; return; }
+  $('auth-err-reg').textContent='';
   const btn=$('r-btn'); btn.disabled=true; btn.textContent='Creating…';
   try{
     await apiJSON('/lc/auth/register',{method:'POST',body:JSON.stringify({name,email,password:pass,passwordConfirm:pass2})});
     await apiJSON('/lc/auth/login',{method:'POST',body:JSON.stringify({email,password:pass})});
     const me=await apiJSON('/lc/auth/me');
-    currentUser=me; $('auth-err').textContent=''; onLoggedIn();
-  }catch(e){ $('auth-err').textContent=e.message; }
+    currentUser=me; onLoggedIn();
+  }catch(e){
+    const msg = e.message||'';
+    // PB returns "email already exists" or similar when account exists
+    if(/already|duplicate|exist/i.test(msg)){
+      $('login-email-display').textContent=email;
+      showAuthStep('auth-step-login');
+      $('auth-err-login').textContent='Account already exists — please sign in';
+      $('l-pass').focus();
+    } else {
+      $('auth-err-reg').textContent=msg;
+    }
+  }
   finally{ btn.disabled=false; btn.textContent='Create account'; }
 }
-$('l-btn').addEventListener('click',doLogin);
 $('r-btn').addEventListener('click',doRegister);
-['l-email','l-pass'].forEach(id=>$(id).addEventListener('keydown',e=>e.key==='Enter'&&doLogin()));
-['r-name','r-email','r-pass','r-pass2'].forEach(id=>$(id).addEventListener('keydown',e=>e.key==='Enter'&&doRegister()));
+['r-name','r-pass','r-pass2'].forEach(id=>$(id).addEventListener('keydown',e=>{ if(e.key==='Enter') doRegister(); }));
 
 // Logout
 $('logout-btn').addEventListener('click',async()=>{

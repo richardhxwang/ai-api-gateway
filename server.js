@@ -3437,7 +3437,12 @@ app.get("/lc/auth/oauth-start", async (req, res) => {
     if (!prov) return res.status(404).json({ error: `Provider ${provider} not configured` });
 
     // PB gives us the full authUrl (with code_challenge/state) + codeVerifier
-    const redirectUrl = `${req.protocol}://${req.get("host")}/lc/auth/oauth-callback`;
+    // Use configured public URL, or derive from X-Forwarded headers, or fallback to request host
+    const publicBase = process.env.LUMICHAT_PUBLIC_URL ||
+      (req.headers["x-forwarded-proto"] && req.headers["x-forwarded-host"]
+        ? `${req.headers["x-forwarded-proto"]}://${req.headers["x-forwarded-host"]}`
+        : `${req.protocol}://${req.get("host")}`);
+    const redirectUrl = `${publicBase}/lc/auth/oauth-callback`;
     const fullAuthUrl = prov.authUrl + encodeURIComponent(redirectUrl);
 
     // Save codeVerifier + provider for the callback
@@ -3484,6 +3489,18 @@ app.get("/lc/auth/oauth-callback", async (req, res) => {
   } catch (err) {
     res.status(500).send(`OAuth callback error: ${err.message}`);
   }
+});
+
+// POST /lc/auth/check-email → check if email exists in PB (for step-based auth UI)
+app.post("/lc/auth/check-email", apiLimiter, async (req, res) => {
+  try {
+    const { email } = req.body || {};
+    if (!email) return res.status(400).json({ error: "Email required" });
+    const r = await pbFetch(`/api/collections/users/records?filter=email%3D'${encodeURIComponent(email)}'&fields=id&perPage=1`);
+    if (!r.ok) return res.json({ exists: false });
+    const data = await r.json();
+    res.json({ exists: (data.totalItems || 0) > 0 });
+  } catch { res.json({ exists: false }); }
 });
 
 // POST /lc/auth/register → proxy to PB
