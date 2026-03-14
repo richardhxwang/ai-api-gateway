@@ -157,8 +157,13 @@
     #stop-btn:hover{background:#d0d0d0}
     #stop-btn svg{width:12px;height:12px;color:var(--sb)}
     #file-chips{display:flex;flex-wrap:wrap;gap:6px;padding:0 12px 8px}
-    .fchip{display:flex;align-items:center;gap:6px;background:var(--sb-active);border:1px solid var(--border);border-radius:8px;padding:4px 8px;font-size:12.5px;color:var(--t2)}
-    .fchip-rm{background:none;border:none;color:var(--t3);cursor:pointer;padding:0;display:flex;align-items:center}
+    .fchip{display:flex;align-items:center;gap:6px;background:var(--sb-active);border:1px solid var(--border);border-radius:10px;padding:4px 8px 4px 4px;font-size:12px;color:var(--t2);max-width:180px;position:relative}
+    .fchip-thumb{width:36px;height:36px;border-radius:7px;object-fit:cover;flex-shrink:0}
+    .fchip-icon{width:36px;height:36px;border-radius:7px;background:var(--inp);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+    .fchip-info{display:flex;flex-direction:column;overflow:hidden;flex:1}
+    .fchip-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--t1);font-size:12px;font-weight:500}
+    .fchip-type{font-size:10.5px;color:var(--t3);text-transform:uppercase}
+    .fchip-rm{background:none;border:none;color:var(--t3);cursor:pointer;padding:0;display:flex;align-items:center;flex-shrink:0;margin-left:2px}
     .fchip-rm:hover{color:var(--t1)}
     .inp-hint{text-align:center;font-size:11.5px;color:var(--t3);margin-top:6px}
 
@@ -272,7 +277,7 @@
         </div>
       </div>
       <p class="inp-hint">LumiChat can make mistakes. Check important info.</p>
-      <input type="file" id="file-in" accept="image/*,.pdf" multiple style="display:none">
+      <input type="file" id="file-in" accept="image/*,video/*,audio/*,.pdf,.txt,.md,.csv,.json,.js,.ts,.py,.html,.css,.xml,.yaml,.yml,.sh,.log" multiple style="display:none">
     </div>
   </div>
 </div>
@@ -544,7 +549,11 @@ async function sendMessage(){
 
   const files=[...pendingFiles]; pendingFiles=[]; fileChips.innerHTML='';
   let userContent=text;
-  files.forEach(f=>{ if(f.isPdf) userContent+=(userContent?'\n':'')+`[Attached: ${f.name}]`; });
+  // Inject text file content inline
+  files.filter(f=>f.kind==='text').forEach(f=>{
+    const ext=f.name.split('.').pop()||'';
+    userContent+=(userContent?'\n\n':'')+`[File: ${f.name}]\n\`\`\`${ext}\n${(f.dataUrl||'').slice(0,12000)}\n\`\`\``;
+  });
 
   // Create session
   if(!currentSid){
@@ -578,10 +587,17 @@ async function sendMessage(){
 
   try{
     const hist=messages.slice(-40);
-    const aiMsgs=buildAiMsgs(hist,files);
+    const aiMsgs=await buildAiMsgs(hist,files,currentSid);
+
+    // Use Gemini native endpoint if any file_data parts exist (video/PDF)
+    const hasFileParts=aiMsgs.some(m=>Array.isArray(m.content)&&m.content.some(p=>p.type==='file_data'));
+    const useNative=hasFileParts&&selectedProvider==='gemini';
+
     const payload={model:selectedModel,messages:aiMsgs,stream:true};
-    if(O_SERIES.has(selectedModel)) payload.max_completion_tokens=4096;
-    else payload.max_tokens=4096;
+    if(!useNative){
+      if(O_SERIES.has(selectedModel)) payload.max_completion_tokens=4096;
+      else payload.max_tokens=4096;
+    }
 
     typRow.remove();
     const aRow=appendMsg('assistant','');
@@ -589,7 +605,8 @@ async function sendMessage(){
     streamEl=aEl; streamText='';
 
     abortCtrl=new AbortController();
-    const res=await fetch(`/v1/${selectedProvider}/v1/chat/completions`,{
+    const endpoint=useNative?'/lc/chat/gemini-native':`/v1/${selectedProvider}/v1/chat/completions`;
+    const res=await fetch(endpoint,{
       method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',
       body:JSON.stringify(payload),signal:abortCtrl.signal,
     });
@@ -650,16 +667,50 @@ async function sendMessage(){
   }
 }
 
-function buildAiMsgs(msgs, files){
+async function uploadToPb(f, sessId){
+  const form=new FormData();
+  form.append('file', f.file, f.name);
+  form.append('session', sessId);
+  const r=await fetch('/lc/files',{method:'POST',credentials:'same-origin',body:form});
+  if(!r.ok) throw new Error(`Upload failed ${r.status}`);
+  return r.json(); // {id, url, mime_type, size_bytes}
+}
+
+async function buildAiMsgs(msgs, files, sessId){
   const out=msgs.map(m=>({role:m.role,content:m.content}));
-  if(files.some(f=>f.isImage)&&out.length){
-    const last=out[out.length-1];
-    if(last.role==='user'){
-      const parts=[{type:'text',text:last.content}];
-      files.filter(f=>f.isImage).forEach(f=>parts.push({type:'image_url',image_url:{url:f.dataUrl}}));
-      last.content=parts;
+  const mediaFiles=files.filter(f=>f.kind!=='text'); // text already injected
+  if(!mediaFiles.length||!out.length) return out;
+  const last=out[out.length-1];
+  if(last.role!=='user') return out;
+  const parts=[{type:'text',text:last.content||''}];
+
+  for(const f of mediaFiles){
+    if(f.kind==='image'){
+      parts.push({type:'image_url',image_url:{url:f.dataUrl}});
+    } else if(f.kind==='audio'){
+      // OpenAI input_audio format (also accepted by Gemini OpenAI compat)
+      const b64=f.dataUrl.split(',')[1]||'';
+      const fmt=f.mime.includes('mp3')||f.name.endsWith('.mp3')?'mp3':
+                f.mime.includes('wav')||f.name.endsWith('.wav')?'wav':
+                f.mime.includes('ogg')||f.name.endsWith('.ogg')?'ogg':
+                f.mime.includes('flac')||f.name.endsWith('.flac')?'flac':'wav';
+      parts.push({type:'input_audio',input_audio:{data:b64,format:fmt}});
+    } else if(f.kind==='video'||f.kind==='pdf'){
+      // Only Gemini supports video/PDF natively → upload to PB then Gemini File API
+      if(selectedProvider==='gemini'){
+        try{
+          const pb=await uploadToPb(f, sessId);
+          const g=await apiJSON(`/lc/files/gemini-upload/${pb.id}`,{method:'POST'});
+          parts.push({type:'file_data',file_data:{mime_type:f.mime,file_uri:g.geminiFileUri}});
+        }catch(e){
+          parts[0].text+=`\n[Failed to upload ${f.name}: ${e.message}]`;
+        }
+      } else {
+        parts[0].text+=`\n[Attached: ${f.name} — ${f.kind==='pdf'?'PDF':'Video'}: requires Gemini for AI analysis]`;
+      }
     }
   }
+  last.content=parts.length>1?parts:parts[0].text;
   return out;
 }
 
@@ -686,24 +737,41 @@ async function autoTitle(sessId, firstText){
 }
 
 // ── FILES ──────────────────────────────────────────────────────────────────
+function fileKind(file){
+  if(file.type.startsWith('image/')) return 'image';
+  if(file.type.startsWith('video/')) return 'video';
+  if(file.type.startsWith('audio/')) return 'audio';
+  if(file.type==='application/pdf'||file.name.endsWith('.pdf')) return 'pdf';
+  const textExts=/\.(txt|md|csv|json|js|ts|jsx|tsx|py|html|css|xml|yaml|yml|sh|log|c|cpp|java|go|rs|rb|php|swift|kt)$/i;
+  if(file.type.startsWith('text/')||textExts.test(file.name)) return 'text';
+  return null;
+}
 function addFile(file){
-  const isPdf=file.type==='application/pdf'||file.name.endsWith('.pdf');
-  const isImg=file.type.startsWith('image/');
-  if(!isPdf&&!isImg){ toast(`Unsupported: ${file.name}`); return; }
-  if(file.size>(isPdf?50:20)*1024*1024){ toast(`Too large: ${file.name}`); return; }
+  const kind=fileKind(file);
+  if(!kind){ toast(`Unsupported type: ${file.name}`); return; }
+  const maxMB={image:20,video:500,audio:100,pdf:50,text:5};
+  if(file.size>maxMB[kind]*1024*1024){ toast(`Too large (max ${maxMB[kind]}MB): ${file.name}`); return; }
+  const obj={name:file.name,mime:file.type||'application/octet-stream',kind,file};
   const reader=new FileReader();
   reader.onload=ev=>{
-    const obj={name:file.name,mime:file.type,isPdf,isImage:isImg};
-    if(isImg) obj.dataUrl=ev.target.result;
+    obj.dataUrl=ev.target.result; // always store dataUrl
     pendingFiles.push(obj); renderChips(); updateSendBtn();
   };
-  reader.readAsDataURL(file);
+  if(kind==='text') reader.readAsText(file);
+  else reader.readAsDataURL(file);
 }
 
+const KIND_ICON={image:'🖼',video:'🎬',audio:'🎵',pdf:'📄',text:'📝'};
+const KIND_LABEL={image:'Image',video:'Video',audio:'Audio',pdf:'PDF',text:'Text'};
+const rmSvg=`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="12" height="12"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
 function renderChips(){
-  fileChips.innerHTML=pendingFiles.map((f,i)=>
-    `<div class="fchip"><span>${esc(f.name)}</span><button class="fchip-rm" data-i="${i}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>`
-  ).join('');
+  fileChips.innerHTML=pendingFiles.map((f,i)=>{
+    const preview=f.kind==='image'&&f.dataUrl
+      ?`<img class="fchip-thumb" src="${f.dataUrl}" alt="">`
+      :`<div class="fchip-icon">${KIND_ICON[f.kind]||'📎'}</div>`;
+    const label=KIND_LABEL[f.kind]||f.kind;
+    return `<div class="fchip">${preview}<div class="fchip-info"><span class="fchip-name">${esc(f.name)}</span><span class="fchip-type">${label}</span></div><button class="fchip-rm" data-i="${i}">${rmSvg}</button></div>`;
+  }).join('');
 }
 
 // ── PROVIDERS / MODELS ────────────────────────────────────────────────────

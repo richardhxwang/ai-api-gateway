@@ -3568,6 +3568,22 @@ app.post("/lc/messages", requireLcAuth, async (req, res) => {
   }
 });
 
+// DELETE /lc/messages/:id → delete a message from PB
+app.delete("/lc/messages/:id", requireLcAuth, async (req, res) => {
+  if (!validPbId(req.params.id)) return res.status(400).json({ error: "Invalid message ID" });
+  try {
+    const r = await pbFetch(`/api/collections/lc_messages/records/${req.params.id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${req.lcToken}` },
+    });
+    if (r.status === 204 || r.ok) return res.json({ success: true });
+    const data = await r.json();
+    res.status(r.status).json(data);
+  } catch {
+    res.status(502).json({ error: "PocketBase unavailable" });
+  }
+});
+
 // POST /lc/files → upload file to PB
 app.post("/lc/files", requireLcAuth, lcUpload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
@@ -3693,12 +3709,128 @@ app.post("/lc/files/gemini-upload/:pbFileId", requireLcAuth, async (req, res) =>
     }
     const uploadData = await uploadRes.json();
     const geminiFileUri = uploadData.file?.uri;
+    const geminiFileName = uploadData.file?.name; // e.g. "files/abc123"
     if (!geminiFileUri) return res.status(502).json({ error: "Gemini did not return file URI" });
+
+    // Poll until ACTIVE (video processing can take a few seconds)
+    const geminiKey2 = (selectApiKey("gemini", "_lumichat") || {}).apiKey || PROVIDERS.gemini?.apiKey;
+    let state = uploadData.file?.state || "PROCESSING";
+    let attempts = 0;
+    while (state !== "ACTIVE" && attempts < 20) {
+      await new Promise(r => setTimeout(r, 2000));
+      attempts++;
+      try {
+        const poll = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/${geminiFileName}?key=${geminiKey2}`
+        );
+        if (poll.ok) {
+          const pd = await poll.json();
+          state = pd.state || state;
+        }
+      } catch { /* keep polling */ }
+    }
+    if (state !== "ACTIVE") return res.status(502).json({ error: `Gemini file not ready (state: ${state})` });
 
     res.json({ geminiFileUri });
   } catch (err) {
     log("error", "lcGeminiUpload error", { error: err.message });
     res.status(500).json({ error: "Gemini upload failed" });
+  }
+});
+
+// POST /lc/chat/gemini-native → Gemini native API for video/PDF/audio via File API
+// Body: { model, messages (OpenAI fmt), stream }
+// Converts file_data parts to Gemini inlineData/fileData format, calls native API
+app.post("/lc/chat/gemini-native", requireLcAuth, express.json({ limit: "1mb" }), async (req, res) => {
+  const { model = "gemini-2.5-flash", messages = [], stream = false } = req.body || {};
+
+  const geminiKey = (selectApiKey("gemini", "_lumichat") || {}).apiKey || PROVIDERS.gemini?.apiKey;
+  if (!geminiKey) return res.status(503).json({ error: "No Gemini key configured" });
+
+  // Convert OpenAI-format messages → Gemini native format
+  function convertPart(p) {
+    if (typeof p === "string") return { text: p };
+    if (p.type === "text") return { text: p.text || "" };
+    if (p.type === "image_url") {
+      const url = p.image_url?.url || "";
+      if (url.startsWith("data:")) {
+        const [meta, b64] = url.split(",");
+        const mime = meta.replace("data:", "").replace(";base64", "");
+        return { inlineData: { mimeType: mime, data: b64 } };
+      }
+      return { fileData: { mimeType: "image/jpeg", fileUri: url } };
+    }
+    if (p.type === "file_data") {
+      return { fileData: { mimeType: p.file_data?.mime_type || "application/octet-stream", fileUri: p.file_data?.file_uri } };
+    }
+    if (p.type === "input_audio") {
+      return { inlineData: { mimeType: `audio/${p.input_audio?.format || "wav"}`, data: p.input_audio?.data || "" } };
+    }
+    return { text: JSON.stringify(p) };
+  }
+
+  const contents = messages.map(m => ({
+    role: m.role === "assistant" ? "model" : "user",
+    parts: Array.isArray(m.content)
+      ? m.content.map(convertPart)
+      : [{ text: m.content || "" }],
+  }));
+
+  const endpoint = stream
+    ? `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${geminiKey}`
+    : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+
+  try {
+    const upstream = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contents, generationConfig: { maxOutputTokens: 4096 } }),
+    });
+
+    if (!upstream.ok) {
+      const err = await upstream.text();
+      return res.status(upstream.status).json({ error: "Gemini error", details: err.substring(0, 500) });
+    }
+
+    if (!stream) {
+      const data = await upstream.json();
+      const text = data.candidates?.[0]?.content?.parts?.map(p => p.text || "").join("") || "";
+      return res.json({ choices: [{ message: { role: "assistant", content: text }, finish_reason: "stop" }] });
+    }
+
+    // SSE streaming — convert Gemini SSE → OpenAI SSE format
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+
+    const reader = upstream.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop() || "";
+      for (const line of lines) {
+        if (!line.startsWith("data:")) continue;
+        const raw = line.slice(5).trim();
+        if (!raw || raw === "[DONE]") continue;
+        try {
+          const j = JSON.parse(raw);
+          const text = j.candidates?.[0]?.content?.parts?.map(p => p.text || "").join("") || "";
+          if (text) {
+            res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`);
+          }
+        } catch { /* skip malformed */ }
+      }
+    }
+    res.write("data: [DONE]\n\n");
+    res.end();
+  } catch (err) {
+    log("error", "lcGeminiNative error", { error: err.message });
+    if (!res.headersSent) res.status(500).json({ error: "Gemini native request failed" });
+    else res.end();
   }
 });
 
