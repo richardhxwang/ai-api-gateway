@@ -3426,34 +3426,39 @@ app.get("/lc/auth/methods", async (req, res) => {
   }
 });
 
+// Server-side PKCE state store: state → { codeVerifier, provider, redirect, redirectUrl, ts }
+// Avoids cookie loss on Safari/mobile during cross-domain OAuth redirect
+const oauthStateStore = new Map();
+setInterval(() => {
+  const cutoff = Date.now() - 600_000;
+  for (const [k, v] of oauthStateStore) if (v.ts < cutoff) oauthStateStore.delete(k);
+}, 120_000);
+
 // GET /lc/auth/oauth-start?provider=google&redirect=... → redirect to PB OAuth URL
 app.get("/lc/auth/oauth-start", async (req, res) => {
   const { provider = "google", redirect = "/lumichat" } = req.query;
   try {
-    // Each call to auth-methods generates a fresh PKCE pair from PB
     const r = await pbFetch("/api/collections/users/auth-methods");
     const data = await r.json();
     const prov = (data.oauth2?.providers || []).find(p => p.name === provider);
     if (!prov) return res.status(404).json({ error: `Provider ${provider} not configured` });
 
-    // PB gives us the full authUrl (with code_challenge/state) + codeVerifier
-    // Use configured public URL, or derive from X-Forwarded headers, or fallback to request host
     const publicBase = process.env.LUMICHAT_PUBLIC_URL ||
       (req.headers["x-forwarded-proto"] && req.headers["x-forwarded-host"]
         ? `${req.headers["x-forwarded-proto"]}://${req.headers["x-forwarded-host"]}`
         : `${req.protocol}://${req.get("host")}`);
     const redirectUrl = `${publicBase}/lc/auth/oauth-callback`;
-    const fullAuthUrl = prov.authUrl + encodeURIComponent(redirectUrl);
 
-    // Save codeVerifier + provider for the callback
-    res.cookie("lc_oauth_state", JSON.stringify({
+    // Store PKCE data server-side keyed by PB's state value (Google echoes it back)
+    oauthStateStore.set(prov.state, {
       codeVerifier: prov.codeVerifier,
-      state: prov.state,
       provider,
       redirect,
       redirectUrl,
-    }), { maxAge: 600, httpOnly: true, sameSite: "Lax", path: "/" });
+      ts: Date.now(),
+    });
 
+    const fullAuthUrl = prov.authUrl + encodeURIComponent(redirectUrl);
     res.redirect(fullAuthUrl);
   } catch (err) {
     res.status(500).json({ error: "OAuth start failed", details: err.message });
@@ -3462,14 +3467,15 @@ app.get("/lc/auth/oauth-start", async (req, res) => {
 
 // GET /lc/auth/oauth-callback?code=...&state=... → exchange code, set lc_token cookie
 app.get("/lc/auth/oauth-callback", async (req, res) => {
-  const { code } = req.query;
-  const cookies = parseCookies(req);
-  let oauthState;
-  try { oauthState = JSON.parse(cookies.lc_oauth_state || "{}"); } catch { oauthState = {}; }
-  res.clearCookie("lc_oauth_state", { path: "/" });
-
+  const { code, state } = req.query;
   if (!code) return res.redirect("/lumichat?oauth_err=missing_code");
-  const { provider = "google", codeVerifier = "", redirectUrl = "", redirect = "/lumichat" } = oauthState;
+
+  // Look up PKCE data from server-side store using the state Google echoed back
+  const stored = oauthStateStore.get(state);
+  oauthStateStore.delete(state);
+
+  if (!stored) return res.redirect("/lumichat?oauth_err=session_expired");
+  const { provider = "google", codeVerifier = "", redirectUrl = "", redirect = "/lumichat" } = stored;
 
   try {
     const r = await pbFetch("/api/collections/users/auth-with-oauth2", {
@@ -3479,15 +3485,18 @@ app.get("/lc/auth/oauth-callback", async (req, res) => {
     });
     const data = await r.json();
     if (!r.ok) return res.redirect(`/lumichat?oauth_err=${encodeURIComponent(data.message || "auth_failed")}`);
+
+    const isSecure = req.secure || req.headers["x-forwarded-proto"] === "https" || (req.headers["cf-visitor"] || "").includes("https");
     res.cookie("lc_token", data.token, {
-      maxAge: 7 * 24 * 3600,
+      maxAge: 7 * 24 * 60 * 60 * 1000,
       httpOnly: true,
-      sameSite: "Strict",
+      secure: isSecure,
+      sameSite: "Lax",
       path: "/",
     });
     res.redirect(redirect + "?oauth=1");
   } catch (err) {
-    res.status(500).send(`OAuth callback error: ${err.message}`);
+    res.redirect(`/lumichat?oauth_err=${encodeURIComponent(err.message)}`);
   }
 });
 
