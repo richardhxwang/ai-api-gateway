@@ -874,13 +874,15 @@ async function initGoogleOAuth(){
   }catch{}
 }
 
-// Handle OAuth callback (?oauth=1&token=...)
+// Handle OAuth callback (?oauth=1 or ?oauth_err=...)
 (function handleOAuthReturn(){
   const p=new URLSearchParams(window.location.search);
-  if(p.get('oauth')==='1'){
-    history.replaceState(null,'',window.location.pathname);
-    // Session was set by server-side cookie; just reload auth check
+  history.replaceState(null,'',window.location.pathname);
+  if(p.get('oauth_err')){
+    // Show error on auth screen after page loads
+    setTimeout(()=>{ const el=$('auth-err'); if(el) el.textContent='Google login failed: '+decodeURIComponent(p.get('oauth_err')); },300);
   }
+  // oauth=1: session cookie already set, tryRestoreSession will pick it up
 })();
 
 // ── BOOT ──────────────────────────────────────────────────────────────────
