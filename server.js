@@ -1340,6 +1340,7 @@ app.get("/lumichat", (req, res) => {
     `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'nonce-${nonce}' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'`
   );
   res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
   // Inject nonce into all <script nonce="{{NONCE}}"> and <style nonce="{{NONCE}}"> placeholders
   const html = fs.readFileSync(htmlPath, 'utf8').replace(/\{\{NONCE\}\}/g, nonce);
   res.send(html);
@@ -3469,7 +3470,7 @@ function validPbId(id) { return typeof id === 'string' && LC_ID_RE.test(id); }
 // GET /lc/sessions → list user's sessions
 app.get("/lc/sessions", requireLcAuth, async (req, res) => {
   try {
-    const r = await pbFetch("/api/collections/lc_sessions/records?sort=-updated&perPage=100", {
+    const r = await pbFetch("/api/collections/lc_sessions/records?perPage=100", {
       headers: { Authorization: `Bearer ${req.lcToken}` },
     });
     const data = await r.json();
@@ -3539,7 +3540,7 @@ app.get("/lc/sessions/:id/messages", requireLcAuth, async (req, res) => {
   if (!validPbId(req.params.id)) return res.status(400).json({ error: "Invalid session ID" });
   try {
     const r = await pbFetch(
-      `/api/collections/lc_messages/records?filter=(session="${req.params.id}")&sort=+created&perPage=200`,
+      `/api/collections/lc_messages/records?filter=(session="${req.params.id}")&perPage=200`,
       { headers: { Authorization: `Bearer ${req.lcToken}` } }
     );
     const data = await r.json();
