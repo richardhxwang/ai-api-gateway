@@ -481,6 +481,7 @@ const TOKENS_FILE = path.join(DATA_DIR, "tokens.json");
 const AUDIT_FILE = path.join(DATA_DIR, "audit.jsonl");
 const STEALTH_CONF_FILE = path.join(DATA_DIR, "stealth.conf");
 const BACKUP_DIR = path.join(DATA_DIR, "backups");
+const COLLECTOR_TOKENS_FILE = path.join(DATA_DIR, "collector-tokens.json");
 
 let dataDirReady = false;
 function ensureDataDir() {
@@ -566,6 +567,33 @@ function applyStealthConf(enabled) {
   } catch (e) { log('warn', 'Failed to write stealth.conf', { err: e.message }); }
 }
 if (!fs.existsSync(STEALTH_CONF_FILE)) applyStealthConf(!!settings.stealthMode);
+
+// --- Collector token management ---
+function loadCollectorTokens() {
+  try {
+    ensureDataDir();
+    if (fs.existsSync(COLLECTOR_TOKENS_FILE)) return JSON.parse(fs.readFileSync(COLLECTOR_TOKENS_FILE, "utf8"));
+  } catch (e) { console.error("Failed to load collector tokens:", e.message); }
+  return {};
+}
+function saveCollectorTokens(tokens) {
+  ensureDataDir();
+  const tmp = COLLECTOR_TOKENS_FILE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(tokens, null, 2), { mode: 0o600 });
+  fs.renameSync(tmp, COLLECTOR_TOKENS_FILE);
+}
+let collectorTokens = loadCollectorTokens();
+
+// Provider access mode: "api_key" (default) or "collector"
+// Persisted in settings.providerAccessModes = { deepseek: "collector", ... }
+function getProviderAccessMode(providerName) {
+  return (settings.providerAccessModes || {})[providerName] || "api_key";
+}
+function setProviderAccessMode(providerName, mode) {
+  if (!settings.providerAccessModes) settings.providerAccessModes = {};
+  settings.providerAccessModes[providerName] = mode;
+  saveSettings(settings);
+}
 
 // --- Audit logging (requires "audit" module) ---
 // Append-only structured audit log: one JSON object per line
@@ -994,15 +1022,26 @@ function decryptEnvKey(envVar) {
   try { return decryptValue(val, ADMIN_SECRET); } catch { return val; }
 }
 
+const KEY_URLS = {
+  openai: "https://platform.openai.com/api-keys",
+  anthropic: "https://console.anthropic.com/settings/keys",
+  deepseek: "https://platform.deepseek.com/api_keys",
+  kimi: "https://platform.moonshot.cn/console/api-keys",
+  qwen: "https://dashscope.console.aliyun.com/apiKey",
+  doubao: "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
+  gemini: "https://aistudio.google.com/apikey",
+  minimax: "https://platform.minimaxi.com/user-center/basic-information/interface-key",
+};
+
 const PROVIDERS = {
-  openai: { baseUrl: process.env.OPENAI_BASE_URL || "https://api.openai.com", apiKey: decryptEnvKey("OPENAI_API_KEY") },
-  anthropic: { baseUrl: process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com", apiKey: decryptEnvKey("ANTHROPIC_API_KEY") },
-  gemini: { baseUrl: process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com", apiKey: decryptEnvKey("GEMINI_API_KEY") },
-  deepseek: { baseUrl: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com", apiKey: decryptEnvKey("DEEPSEEK_API_KEY") },
-  kimi: { baseUrl: process.env.KIMI_BASE_URL || "https://api.moonshot.cn", apiKey: decryptEnvKey("KIMI_API_KEY") },
-  doubao: { baseUrl: process.env.DOUBAO_BASE_URL || "https://ark.cn-beijing.volces.com/api/v3", apiKey: decryptEnvKey("DOUBAO_API_KEY") },
-  qwen: { baseUrl: process.env.QWEN_BASE_URL || "https://dashscope.aliyuncs.com/compatible-mode", apiKey: decryptEnvKey("QWEN_API_KEY") },
-  minimax: { baseUrl: process.env.MINIMAX_BASE_URL || "https://api.minimax.io", apiKey: decryptEnvKey("MINIMAX_API_KEY") },
+  openai: { baseUrl: process.env.OPENAI_BASE_URL || "https://api.openai.com", apiKey: decryptEnvKey("OPENAI_API_KEY"), keyUrl: KEY_URLS.openai },
+  anthropic: { baseUrl: process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com", apiKey: decryptEnvKey("ANTHROPIC_API_KEY"), keyUrl: KEY_URLS.anthropic },
+  gemini: { baseUrl: process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com", apiKey: decryptEnvKey("GEMINI_API_KEY"), keyUrl: KEY_URLS.gemini },
+  deepseek: { baseUrl: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com", apiKey: decryptEnvKey("DEEPSEEK_API_KEY"), keyUrl: KEY_URLS.deepseek },
+  kimi: { baseUrl: process.env.KIMI_BASE_URL || "https://api.moonshot.cn", apiKey: decryptEnvKey("KIMI_API_KEY"), keyUrl: KEY_URLS.kimi },
+  doubao: { baseUrl: process.env.DOUBAO_BASE_URL || "https://ark.cn-beijing.volces.com/api/v3", apiKey: decryptEnvKey("DOUBAO_API_KEY"), keyUrl: KEY_URLS.doubao },
+  qwen: { baseUrl: process.env.QWEN_BASE_URL || "https://dashscope.aliyuncs.com/compatible-mode", apiKey: decryptEnvKey("QWEN_API_KEY"), keyUrl: KEY_URLS.qwen },
+  minimax: { baseUrl: process.env.MINIMAX_BASE_URL || "https://api.minimax.io", apiKey: decryptEnvKey("MINIMAX_API_KEY"), keyUrl: KEY_URLS.minimax },
 };
 
 // Migrate single .env keys to multi-key store
@@ -1307,7 +1346,8 @@ app.get("/providers", (req, res) => {
   res.json(Object.entries(PROVIDERS).map(([name, cfg]) => {
     const allKeys = providerKeys[name] || [];
     const enabledKeys = allKeys.filter(k => k.enabled);
-    const entry = { name, baseUrl: cfg.baseUrl, available: enabledKeys.length > 0 };
+    const isCollector = getProviderAccessMode(name) === "collector" && !!collectorTokens[name];
+    const entry = { name, baseUrl: cfg.baseUrl, available: enabledKeys.length > 0 || isCollector, accessMode: getProviderAccessMode(name) };
     if (admin) { entry.keyCount = allKeys.length; entry.enabledCount = enabledKeys.length; }
     return entry;
   }));
@@ -2382,6 +2422,68 @@ app.delete("/admin/keys/:provider/:keyId", requireModule("multikey"), requireRol
   try { PROVIDERS[name].apiKey = decryptValue(providerKeys[name].find(k => k.enabled)?.key, ADMIN_SECRET); } catch { PROVIDERS[name].apiKey = undefined; }
   saveKeys(providerKeys);
   res.json({ success: true });
+});
+
+// --- Collector management (web collection adapters) ---
+const COLLECTOR_SUPPORTED = ["deepseek", "doubao", "chatgpt", "kimi", "qwen"];
+
+// Get collector status for all providers
+app.get("/admin/collector/status", requireRole("root", "admin"), (req, res) => {
+  const status = {};
+  for (const name of Object.keys(PROVIDERS)) {
+    status[name] = {
+      accessMode: getProviderAccessMode(name),
+      collectorSupported: COLLECTOR_SUPPORTED.includes(name),
+      hasToken: !!collectorTokens[name],
+      keyUrl: PROVIDERS[name].keyUrl || null,
+    };
+  }
+  let credentialFields = {};
+  try { credentialFields = require("./collector").credentialFields; } catch {}
+  res.json({ providers: status, credentialFields });
+});
+
+// Save collector session token (encrypted)
+app.put("/admin/collector/token/:provider", requireRole("root", "admin"), (req, res) => {
+  const name = req.params.provider.toLowerCase();
+  if (!PROVIDERS[name]) return res.status(404).json({ error: "Unknown provider" });
+  if (!COLLECTOR_SUPPORTED.includes(name)) return res.status(400).json({ error: `Collector not supported for ${name}` });
+  const { credentials } = req.body;
+  if (!credentials || typeof credentials !== "object") return res.status(400).json({ error: "credentials object required" });
+  // Encrypt and save
+  collectorTokens[name] = encryptValue(JSON.stringify(credentials), ADMIN_SECRET);
+  saveCollectorTokens(collectorTokens);
+  audit(req.userName, "collector_token_update", name);
+  log("info", "Collector token updated", { provider: name });
+  res.json({ success: true });
+});
+
+// Delete collector session token
+app.delete("/admin/collector/token/:provider", requireRole("root", "admin"), (req, res) => {
+  const name = req.params.provider.toLowerCase();
+  if (!collectorTokens[name]) return res.status(404).json({ error: "No collector token for this provider" });
+  delete collectorTokens[name];
+  saveCollectorTokens(collectorTokens);
+  audit(req.userName, "collector_token_delete", name);
+  res.json({ success: true });
+});
+
+// Switch provider access mode (api_key / collector)
+app.put("/admin/providers/:name/access-mode", requireRole("root", "admin"), (req, res) => {
+  const name = req.params.name.toLowerCase();
+  if (!PROVIDERS[name]) return res.status(404).json({ error: "Unknown provider" });
+  const { mode } = req.body;
+  if (!["api_key", "collector"].includes(mode)) return res.status(400).json({ error: "mode must be 'api_key' or 'collector'" });
+  if (mode === "collector" && !COLLECTOR_SUPPORTED.includes(name)) {
+    return res.status(400).json({ error: `Collector not supported for ${name}` });
+  }
+  if (mode === "collector" && !collectorTokens[name]) {
+    return res.status(400).json({ error: "Save collector credentials first before switching to collector mode" });
+  }
+  setProviderAccessMode(name, mode);
+  audit(req.userName, "access_mode_change", name, { mode });
+  log("info", "Provider access mode changed", { provider: name, mode });
+  res.json({ success: true, mode });
 });
 
 // --- User Management (root and admin only) ---
@@ -3605,9 +3707,280 @@ app.get("/lc/auth/me", requireLcAuth, async (req, res) => {
   }
 });
 
+// PATCH /lc/auth/profile → update display name + avatar
+app.patch("/lc/auth/profile", requireLcAuth, lcUpload.single("avatar"), async (req, res) => {
+  try {
+    const form = new FormData();
+    const name = req.body?.name;
+    if (typeof name === "string") form.append("name", name.trim().slice(0, 100));
+    if (req.file) {
+      const blob = new Blob([require("fs").readFileSync(req.file.path)], { type: req.file.mimetype || "image/jpeg" });
+      form.append("avatar", blob, req.file.originalname || "avatar.jpg");
+      require("fs").unlinkSync(req.file.path);
+    }
+    const r = await fetch(`${PB_URL}/api/collections/users/records/${req.lcUser.id}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${req.lcToken}` },
+      body: form,
+    });
+    const data = await r.json();
+    if (!r.ok) return res.status(r.status).json({ error: data.message || "Update failed" });
+    const avatarUrl = data.avatar
+      ? `${PB_URL}/api/files/users/${data.id}/${data.avatar}?thumb=80x80`
+      : null;
+    res.json({ id: data.id, email: data.email, name: data.name || null, avatarUrl });
+  } catch (e) {
+    if (req.file) { try { require("fs").unlinkSync(req.file.path); } catch {} }
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /lc/auth/change-password → change password (requires old password)
+app.post("/lc/auth/change-password", requireLcAuth, async (req, res) => {
+  const { oldPassword, newPassword } = req.body || {};
+  if (!oldPassword || !newPassword) return res.status(400).json({ error: "Missing fields" });
+  if (newPassword.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters" });
+  try {
+    const r = await fetch(`${PB_URL}/api/collections/users/records/${req.lcUser.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${req.lcToken}` },
+      body: JSON.stringify({ oldPassword, password: newPassword, passwordConfirm: newPassword }),
+    });
+    const data = await r.json();
+    if (!r.ok) return res.status(r.status).json({ error: data.message || "Password change failed" });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // PocketBase record ID validation (15 alphanumeric chars)
 const LC_ID_RE = /^[a-zA-Z0-9]{15}$/;
 function validPbId(id) { return typeof id === 'string' && LC_ID_RE.test(id); }
+
+// ── SearXNG web search ────────────────────────────────────────────────────
+// GET /lc/search?q=... → query SearXNG JSON API, return top results
+const SEARXNG_URL = process.env.SEARXNG_URL || "http://lumigate-searxng:8080";
+app.get("/lc/search", requireLcAuth, async (req, res) => {
+  const q = (req.query.q || "").trim();
+  if (!q) return res.status(400).json({ error: "Missing query" });
+  try {
+    const url = `${SEARXNG_URL}/search?q=${encodeURIComponent(q)}&format=json&language=auto&safesearch=0`;
+    const r = await fetch(url, { headers: { "Accept": "application/json" }, signal: AbortSignal.timeout(8000) });
+    if (!r.ok) throw new Error(`SearXNG ${r.status}`);
+    const data = await r.json();
+    const results = (data.results || []).slice(0, 8).map(item => ({
+      title: item.title || "",
+      url: item.url || "",
+      content: (item.content || "").slice(0, 400),
+      engine: item.engine || "",
+    }));
+    res.json({ query: q, results });
+  } catch (e) {
+    res.status(502).json({ error: `Search unavailable: ${e.message}` });
+  }
+});
+
+// ── GET /lc/suggest → server-side: search SearXNG + call AI → return 4 suggestion questions
+// Avoids client-side chained fetches which are brittle (cookie timing, provider selection)
+app.get("/lc/suggest", requireLcAuth, async (req, res) => {
+  console.log("[lc/suggest] called, user:", req.lcUser?.email);
+  const memory = (req.query.memory || "").slice(0, 500);
+  const today = new Date().toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" });
+
+  // 1. Fetch news headlines from SearXNG
+  let newsSection = "";
+  try {
+    const url = `${SEARXNG_URL}/search?q=${encodeURIComponent("今日热点新闻科技AI")}&format=json&language=auto&safesearch=0`;
+    const nr = await fetch(url, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(6000) });
+    if (nr.ok) {
+      const nd = await nr.json();
+      const headlines = (nd.results || []).slice(0, 5).map((r, i) => `${i + 1}. ${r.title}`).join("\n");
+      if (headlines) newsSection = `\n最新新闻（来自搜索引擎）：\n${headlines}`;
+    }
+  } catch { /* ignore — generate without news */ }
+
+  // 2. Pick cheapest available provider + key (check both multi-key store and env fallback)
+  const CHEAP = [
+    { p: "deepseek", m: "deepseek-chat" },
+    { p: "minimax", m: "MiniMax-M1" },
+    { p: "qwen", m: "qwen-turbo" },
+    { p: "openai", m: "gpt-4.1-nano" },
+    { p: "gemini", m: "gemini-2.5-flash-lite" },
+  ];
+  let pick = null, pickApiKey = null;
+  for (const c of CHEAP) {
+    const prov = PROVIDERS[c.p];
+    if (!prov) continue;
+    // prefer multi-key store; fall back to env key
+    const keyInfo = selectApiKey(c.p, "_lumichat");
+    const apiKey = keyInfo?.apiKey || prov.apiKey;
+    if (apiKey) { pick = c; pickApiKey = apiKey; break; }
+  }
+  if (!pick) return res.status(503).json({ error: "No AI provider available" });
+
+  // 3. Build prompt
+  const memSection = memory ? `\n用户背景信息（全局记忆）：\n${memory}` : "";
+  const prompt = `今天是${today}。为一个 AI 助手对话界面生成 4 个首页推荐问题，供用户点击发起对话。
+
+这些问题是"用户想向 AI 提问的内容"，不是问 AI 自身感受或观点的问题。
+绝对禁止："你最喜欢/感兴趣的是什么"、"你怎么看"、"作为AI你如何"——这类问 AI 自己的废话。
+
+好的问题示例（具体、实用、用户真正会问的）：
+- "Python 写爬虫被反爬了怎么处理？"
+- "苹果最新发布会有哪些亮点？"
+- "帮我写一个每日任务清单模板"
+- "今天适合出去跑步吗，北京天气怎样？"
+
+要求：
+- 如果有用户背景，结合其职业/兴趣生成用户**真正会遇到的问题**（如"某技术怎么用"、"某场景怎么解决"），不是问 AI 对该领域的看法
+- 其余问题基于最新新闻事件，问的是"这件事是什么/为什么/有什么影响"
+- 每个问题不超过 18 个字（中文），口语化，像真人在搜索框里打的那种${memSection}${newsSection}
+
+只输出一个 JSON 数组，包含 4 个字符串，不要任何解释或 markdown。示例：["问题1","问题2","问题3","问题4"]`;
+
+  // 4. Call AI provider directly
+  try {
+    const prov = PROVIDERS[pick.p];
+    const aiRes = await fetch(`${prov.baseUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${pickApiKey}` },
+      body: JSON.stringify({ model: pick.m, messages: [{ role: "user", content: prompt }], max_tokens: 300, temperature: 0.85, stream: false }),
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!aiRes.ok) return res.status(502).json({ error: `AI error ${aiRes.status}` });
+    const j = await aiRes.json();
+    const text = j.choices?.[0]?.message?.content || "";
+    const m = text.match(/\[[\s\S]*\]/);
+    if (!m) return res.status(502).json({ error: "Bad AI response" });
+    const arr = JSON.parse(m[0]);
+    if (!Array.isArray(arr) || arr.length < 2) return res.status(502).json({ error: "Bad AI response" });
+    res.json({ suggestions: arr.slice(0, 4).map(s => String(s).trim()).filter(Boolean) });
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
+// ── lc_user_settings ──────────────────────────────────────────────────────
+// GET /lc/user/settings → get or create settings record for current user
+app.get("/lc/user/settings", requireLcAuth, async (req, res) => {
+  try {
+    const r = await pbFetch(
+      `/api/collections/lc_user_settings/records?filter=user%3D'${req.lcUser.id}'&perPage=1`,
+      { headers: { Authorization: `Bearer ${req.lcToken}` } }
+    );
+    const d = await r.json();
+    const record = d.items?.[0] || null;
+    if (record) return res.json(record);
+    // Auto-create empty settings for this user
+    const cr = await pbFetch("/api/collections/lc_user_settings/records", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${req.lcToken}` },
+      body: JSON.stringify({ user: req.lcUser.id, sensitivity: "default", theme: "dark", compact: false, presets: [] }),
+    });
+    const created = await cr.json();
+    res.status(cr.status).json(created);
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// PATCH /lc/user/settings → update settings (upsert)
+app.patch("/lc/user/settings", requireLcAuth, async (req, res) => {
+  try {
+    const allowed = ["memory", "sensitivity", "presets", "theme", "compact", "active_project"];
+    const body = {};
+    for (const k of allowed) if (req.body && k in req.body) body[k] = req.body[k];
+
+    // Find existing record
+    const fr = await pbFetch(
+      `/api/collections/lc_user_settings/records?filter=user%3D'${req.lcUser.id}'&perPage=1`,
+      { headers: { Authorization: `Bearer ${req.lcToken}` } }
+    );
+    const fd = await fr.json();
+    const existing = fd.items?.[0];
+
+    let r;
+    if (existing) {
+      r = await pbFetch(`/api/collections/lc_user_settings/records/${existing.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${req.lcToken}` },
+        body: JSON.stringify(body),
+      });
+    } else {
+      r = await pbFetch("/api/collections/lc_user_settings/records", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${req.lcToken}` },
+        body: JSON.stringify({ user: req.lcUser.id, sensitivity: "default", theme: "dark", compact: false, presets: [], ...body }),
+      });
+    }
+    const d = await r.json();
+    res.status(r.status).json(d);
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// ── lc_projects ───────────────────────────────────────────────────────────
+// GET /lc/projects → list user's projects
+app.get("/lc/projects", requireLcAuth, async (req, res) => {
+  try {
+    const r = await pbFetch(
+      `/api/collections/lc_projects/records?filter=user%3D'${req.lcUser.id}'&perPage=100&sort=sort_order,created`,
+      { headers: { Authorization: `Bearer ${req.lcToken}` } }
+    );
+    const d = await r.json();
+    res.status(r.status).json(d);
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// POST /lc/projects → create project
+app.post("/lc/projects", requireLcAuth, async (req, res) => {
+  const { name, color, instructions, memory, sort_order } = req.body || {};
+  if (!name || typeof name !== "string" || !name.trim()) return res.status(400).json({ error: "name required" });
+  try {
+    const r = await pbFetch("/api/collections/lc_projects/records", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${req.lcToken}` },
+      body: JSON.stringify({
+        user: req.lcUser.id,
+        name: name.trim().slice(0, 100),
+        color: color || "#6366f1",
+        instructions: instructions || "",
+        memory: memory || "",
+        sort_order: sort_order ?? 0,
+      }),
+    });
+    const d = await r.json();
+    res.status(r.status).json(d);
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// PATCH /lc/projects/:id → update project
+app.patch("/lc/projects/:id", requireLcAuth, async (req, res) => {
+  if (!validPbId(req.params.id)) return res.status(400).json({ error: "Invalid ID" });
+  const allowed = ["name", "color", "instructions", "memory", "sort_order"];
+  const body = {};
+  for (const k of allowed) if (req.body && k in req.body) body[k] = req.body[k];
+  if (body.name) body.name = String(body.name).trim().slice(0, 100);
+  try {
+    const r = await pbFetch(`/api/collections/lc_projects/records/${req.params.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${req.lcToken}` },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    res.status(r.status).json(d);
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// DELETE /lc/projects/:id → delete project
+app.delete("/lc/projects/:id", requireLcAuth, async (req, res) => {
+  if (!validPbId(req.params.id)) return res.status(400).json({ error: "Invalid ID" });
+  try {
+    const r = await pbFetch(`/api/collections/lc_projects/records/${req.params.id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${req.lcToken}` },
+    });
+    res.status(r.status).json({ success: r.ok });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
 
 // GET /lc/sessions → list user's sessions
 app.get("/lc/sessions", requireLcAuth, async (req, res) => {
@@ -3631,6 +4004,7 @@ app.post("/lc/sessions", requireLcAuth, async (req, res) => {
       provider: req.body?.provider || "openai",
       model: req.body?.model || "gpt-4.1-mini",
     };
+    if (req.body?.project && validPbId(req.body.project)) body.project = req.body.project;
     const r = await pbFetch("/api/collections/lc_sessions/records", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${req.lcToken}` },
@@ -3978,7 +4352,7 @@ app.post("/lc/chat/gemini-native", requireLcAuth, express.json({ limit: "1mb" })
 
 // ── End LumiChat routes ───────────────────────────────────────────────────────
 
-app.use("/v1/:provider", apiLimiter, (req, res, next) => {
+app.use("/v1/:provider", apiLimiter, async (req, res, next) => {
   // Identify project: internal chat key, admin session, project key, or reject
   let projectName;
   const projectKey =
@@ -4096,6 +4470,64 @@ app.use("/v1/:provider", apiLimiter, (req, res, next) => {
   if (!provider) {
     return res.status(404).json({ error: "Unknown provider" });
   }
+
+  // --- Collector branch: if provider is in collector mode, route through web collection ---
+  if (getProviderAccessMode(providerName) === "collector" && COLLECTOR_SUPPORTED.includes(providerName)) {
+    const encToken = collectorTokens[providerName];
+    if (!encToken) {
+      return res.status(500).json({ error: `No collector credentials configured for ${providerName}` });
+    }
+    let credentials;
+    try { credentials = JSON.parse(decryptValue(encToken, ADMIN_SECRET)); } catch (e) {
+      return res.status(500).json({ error: `Failed to decrypt collector credentials for ${providerName}` });
+    }
+    const messages = req.body?.messages;
+    const modelId = req.body?.model || "";
+    const isStream = req.body?.stream !== false;
+    if (!messages || !Array.isArray(messages)) {
+      return res.status(400).json({ error: "messages array required" });
+    }
+    req._proxyProjectName = projectName;
+    try {
+      const collector = require("./collector");
+      if (isStream) {
+        res.setHeader("Content-Type", "text/event-stream");
+        res.setHeader("Cache-Control", "no-cache");
+        res.setHeader("Connection", "keep-alive");
+        res.setHeader("X-Accel-Buffering", "no");
+        for await (const chunk of collector.sendMessage(providerName, modelId, messages, credentials, req.signal)) {
+          res.write(chunk);
+        }
+        res.end();
+      } else {
+        // Non-stream: collect all chunks and return as single response
+        let fullContent = "";
+        for await (const chunk of collector.sendMessage(providerName, modelId, messages, credentials, req.signal)) {
+          const parsed = chunk.match(/^data: (.+)$/m);
+          if (parsed && parsed[1] !== "[DONE]") {
+            try {
+              const obj = JSON.parse(parsed[1]);
+              const delta = obj.choices?.[0]?.delta?.content;
+              if (delta) fullContent += delta;
+            } catch {}
+          }
+        }
+        res.json({
+          id: `chatcmpl-collector-${Date.now()}`,
+          object: "chat.completion",
+          created: Math.floor(Date.now() / 1000),
+          model: modelId,
+          choices: [{ index: 0, message: { role: "assistant", content: fullContent }, finish_reason: "stop" }],
+        });
+      }
+      log("info", "Collector request completed", { provider: providerName, model: modelId, project: projectName });
+    } catch (e) {
+      log("error", "Collector error", { provider: providerName, error: e.message });
+      if (!res.headersSent) res.status(502).json({ error: `Collector error: ${e.message}` });
+    }
+    return;
+  }
+
   // Select API key: project-specific first, then public
   const selectedKey = selectApiKey(providerName, projectName);
   if (!selectedKey && !provider.apiKey) {

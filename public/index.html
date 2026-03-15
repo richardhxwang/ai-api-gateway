@@ -1012,6 +1012,7 @@ let userRole = '';
 let userProjects = [];
 let cachedUsageSummary = null;
 let cachedUsageDetail = null;
+let collectorStatus = {}; // { providers: { deepseek: { accessMode, collectorSupported, hasToken, keyUrl }, ... }, credentialFields: {...} }
 let projectsList = [];
 
 function esc(s) {
@@ -1533,6 +1534,13 @@ async function load() {
       document.getElementById('hUptime').textContent = d.uptime;
     }).catch(() => {});
 
+    // Load collector status (admin only, non-blocking)
+    if (adminAuthed) {
+      fetch(B + '/admin/collector/status').then(r => r.json()).then(d => {
+        collectorStatus = d;
+      }).catch(() => {});
+    }
+
     renderProvGrid();
     renderProvTabs();
     if (!activeProv || !p.find(x => x.name === activeProv)) {
@@ -1661,11 +1669,56 @@ async function switchProv(name) {
       </div>`;
   }
 
+  // Collector status for this provider
+  const cs = collectorStatus?.providers?.[name] || {};
+  const isCollectorMode = cs.accessMode === 'collector';
+  const keyUrl = cs.keyUrl || '';
+
+  // Access mode toggle + key URL button (root/admin only)
+  let accessModeHtml = '';
+  if (isRoot() && cs.collectorSupported) {
+    accessModeHtml = `
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.06)">
+        <span style="font-size:12px;font-weight:600;color:rgba(0,0,0,0.5)">Access Mode</span>
+        <button class="btn sm${!isCollectorMode ? ' pri' : ''}" onclick="setAccessMode('${esc(name)}','api_key')" style="font-size:11px">API Key</button>
+        <button class="btn sm${isCollectorMode ? ' pri' : ''}" onclick="setAccessMode('${esc(name)}','collector')" style="font-size:11px">Collector</button>
+        <span style="flex:1"></span>
+        ${keyUrl ? `<a href="${esc(keyUrl)}" target="_blank" class="btn sm" style="font-size:11px;text-decoration:none">Get API Key &rarr;</a>` : ''}
+      </div>`;
+  } else if (keyUrl) {
+    accessModeHtml = `
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.06)">
+        <span style="flex:1"></span>
+        <a href="${esc(keyUrl)}" target="_blank" class="btn sm" style="font-size:11px;text-decoration:none">Get API Key &rarr;</a>
+      </div>`;
+  }
+
+  // Collector credentials section (when in collector mode)
+  let collectorHtml = '';
+  if (isRoot() && isCollectorMode) {
+    const cf = collectorStatus?.credentialFields?.[name] || {};
+    collectorHtml = `
+      <div style="padding:8px 0;border-bottom:1px solid rgba(0,0,0,0.06)">
+        <div style="font-size:12px;font-weight:600;color:rgba(0,0,0,0.5);margin-bottom:4px">
+          Collector Session Token
+          <span class="tag ${cs.hasToken ? 'on' : 'off'}" style="margin-left:6px">${cs.hasToken ? 'Configured' : 'Not Set'}</span>
+        </div>
+        <div style="font-size:11px;color:rgba(0,0,0,0.35);margin-bottom:6px">${esc(cf.instructions || '')}</div>
+        <textarea id="collectorTokenInput" rows="3" style="width:100%;font-size:11px;font-family:monospace;padding:6px;border:1px solid rgba(0,0,0,0.12);border-radius:4px;resize:vertical" placeholder='Paste credentials JSON: ${esc(JSON.stringify(Object.fromEntries((cf.fields||[]).map(f=>[f,"..."]))))}'></textarea>
+        <div style="display:flex;gap:6px;margin-top:4px">
+          <button class="btn sm pri" onclick="saveCollectorToken('${esc(name)}')">Save Token</button>
+          ${cs.hasToken ? `<button class="btn sm" onclick="deleteCollectorToken('${esc(name)}')" style="color:#d32f2f">Delete</button>` : ''}
+        </div>
+      </div>`;
+  }
+
   panel.innerHTML = `
     <div class="prov-info-bar">
       <span class="prov-url">${esc(prov.baseUrl)}</span>
-      <span class="tag ${prov.available ? 'on' : 'off'}">${prov.available ? 'Active' : 'No Key'}</span>
+      <span class="tag ${prov.available || isCollectorMode ? 'on' : 'off'}">${isCollectorMode ? 'Collector' : (prov.available ? 'Active' : 'No Key')}</span>
     </div>
+    ${accessModeHtml}
+    ${collectorHtml}
     ${keysHtml}
     ${models.length ? `<div class="model-list">
       ${models.map((m, i) => `
@@ -2214,6 +2267,67 @@ function revealAndCopy(el, key) {
 // ============================================================
 let currentKeysProvider = '';
 let keysDropdownOpen = false;
+
+// ============================================================
+// Collector management functions
+// ============================================================
+async function setAccessMode(provider, mode) {
+  try {
+    const d = await fetch(`${B}/admin/providers/${provider}/access-mode`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode })
+    }).then(r => r.json());
+    if (d.success) {
+      showT(`${provider} switched to ${mode} mode`, 'success');
+      // Reload collector status and refresh panel
+      collectorStatus = await fetch(B + '/admin/collector/status').then(r => r.json());
+      switchProv(provider);
+    } else {
+      showT(d.error, 'error');
+    }
+  } catch (e) { showT(e.message, 'error'); }
+}
+
+async function saveCollectorToken(provider) {
+  const input = document.getElementById('collectorTokenInput');
+  if (!input) return;
+  const raw = input.value.trim();
+  if (!raw) { showT('Paste credentials first', 'error'); return; }
+  let credentials;
+  try { credentials = JSON.parse(raw); } catch {
+    showT('Invalid JSON — paste a valid credentials object', 'error');
+    return;
+  }
+  try {
+    const d = await fetch(`${B}/admin/collector/token/${provider}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credentials })
+    }).then(r => r.json());
+    if (d.success) {
+      showT(`${provider} collector token saved`, 'success');
+      collectorStatus = await fetch(B + '/admin/collector/status').then(r => r.json());
+      switchProv(provider);
+    } else {
+      showT(d.error, 'error');
+    }
+  } catch (e) { showT(e.message, 'error'); }
+}
+
+async function deleteCollectorToken(provider) {
+  if (!confirm(`Delete collector token for ${provider}?`)) return;
+  try {
+    const d = await fetch(`${B}/admin/collector/token/${provider}`, { method: 'DELETE' }).then(r => r.json());
+    if (d.success) {
+      showT(`${provider} collector token deleted`, 'success');
+      collectorStatus = await fetch(B + '/admin/collector/status').then(r => r.json());
+      switchProv(provider);
+    } else {
+      showT(d.error, 'error');
+    }
+  } catch (e) { showT(e.message, 'error'); }
+}
 
 function toggleKeysDropdown() {
   keysDropdownOpen = !keysDropdownOpen;

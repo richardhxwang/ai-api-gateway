@@ -1,0 +1,35 @@
+use_default_settings: true
+
+search:
+  formats:
+    - html
+    - json
+  safe_search: 0
+  default_lang: "auto"
+  max_page: 1
+
+server:
+  secret_key: "lumigate_searxng_secret_32chars_xx"
+  limiter: false
+  image_proxy: false
+  bind_address: "0.0.0.0"
+  port: 8888
+
+engines:
+  - name: google
+    disabled: false
+  - name: bing
+    disabled: false
+  - name: duckduckgo
+    disabled: false
+  - name: wikipedia
+    disabled: false
+  - name: github
+    disabled: false
+  - name: stackoverflow
+    disabled: false
+
+ui:
+  static_use_hash: true
+  infinite_scroll: false
+  default_theme: simple

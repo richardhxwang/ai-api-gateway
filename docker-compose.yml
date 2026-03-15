@@ -18,6 +18,18 @@ services:
       retries: 2
       start_period: 3s
 
+  # SearXNG — private web search engine, accessible only within Docker network
+  searxng:
+    image: searxng/searxng:latest
+    container_name: lumigate-searxng
+    expose:
+      - "8080"
+    volumes:
+      - ./searxng:/etc/searxng:ro
+    environment:
+      - SEARXNG_BASE_URL=http://lumigate-searxng:8080
+    restart: unless-stopped
+
   # App server — can be rebuilt/restarted without downtime
   lumigate:
     build: .
@@ -30,6 +42,8 @@ services:
       - .env
     volumes:
       - ./data:/app/data
+    depends_on:
+      - searxng
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:9471/health',r=>{r.statusCode===200?process.exit(0):process.exit(1)}).on('error',()=>process.exit(1))"]
       interval: 5s
